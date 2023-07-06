@@ -86,9 +86,15 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   
   # set family name as col/row splits
   class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia"))
-  split_rows <- factor(df_wide$order, levels = unique(df_wide$order))
-  split_cols <- c(df_wide$order, "empty")
-  split_cols <- factor(split_cols, levels = c(levels(split_rows), "empty"))
+  if(model_type == "family"){
+    split_rows <- factor(df_wide$order, levels = unique(df_wide$order))
+    split_cols <- factor(c(df_wide$order, "empty"), levels = c(levels(split_rows), "empty"))
+  }
+  if(model_type == "species"){
+    split_rows <- factor(df_wide$family, levels = unique(df_wide$family))
+    split_cols <- factor(c(df_wide$family, "empty"), levels = c(levels(split_rows), "empty"))
+  }
+
   
   # set col/row order
   ordered_rows <- df_wide$class_name

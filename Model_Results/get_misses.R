@@ -64,13 +64,22 @@ get_misses <- function(model_type) {
                                               ifelse(prediction == "vehicle", "vehicle", prediction_class))) %>%
       dplyr::mutate(prediction_order = factor(prediction_order, levels = rev(tax_order)))
     
-    # add true pos rate to plot on secondary axis
-    misses <- misses %>%
-      dplyr::left_join(true_pos_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold)) %>%
-      dplyr::left_join(false_pos_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold)) %>%
-      dplyr::left_join(false_neg_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold))
   }
   
+  if(model_type == "species"){
+    higher_preds <- group_labs %>%
+      dplyr::rename(prediction_family = family, prediction_order = order, prediction_class = class)
+    
+    misses <- misses %>%
+      dplyr::left_join(higher_preds, by = join_by(prediction == common.name.general)) %>%
+      dplyr::mutate(prediction = factor(prediction, levels = rev(pred_order)))
+  }
+  
+  # add true pos rate to plot on secondary axis
+  misses <- misses %>%
+    dplyr::left_join(true_pos_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold)) %>%
+    dplyr::left_join(false_pos_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold)) %>%
+    dplyr::left_join(false_neg_df, by = dplyr::join_by(class_name == class, score_threshold==score_threshold))
   
   return(misses)
 }

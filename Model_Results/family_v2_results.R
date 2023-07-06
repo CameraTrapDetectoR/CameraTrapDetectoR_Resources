@@ -28,7 +28,6 @@ targets <- utils::read.csv(paste0(output_dir, "/target_df.csv"))
 # format label dictionary
 group_labs <- group_labels()
 
-
 # set label orders
 class_order <- unique(group_labs$family)
 pred_order <- c(unique(class_order[class_order %in% targets$class_name]), "empty")
@@ -117,7 +116,7 @@ for(i in 1:length(tax_order)){
 }
 dev.off()
 
-# Plot misclassifications
+## -- Track misclassifications
 
 misses <- get_misses(model_type = "family")
 
@@ -125,7 +124,9 @@ misses <- get_misses(model_type = "family")
 order_factor <- factor(na.omit(unique(group_lab_join$order)))
 color_factor <- paletteer::paletteer_d("ggsci::default_igv")
 color_factor <- sample(color_factor, size = length(order_factor), replace = FALSE)
-col_dict <- data.frame(pred_order = order_factor, color = color_factor)
+col_dict <- data.frame(pred_order = order_factor, col = color_factor)
+
+
 
 # build out heatmap with example family
 class_i <- "Aramidae"
@@ -188,7 +189,10 @@ misses_heatmap <- ComplexHeatmap::Heatmap(prop_mat, name = "Proportion", rect_gp
                                           }, show_heatmap_legend = FALSE,
                                           bottom_annotation = bottom_annotation)
 
-pdf(file=paste0(viz_path, "family_v2_misclassification_", class_i, "_draft",".pdf"),
+
+# --- END
+
+pdf(file=paste0(viz_path, model_type, "_v2_misclassification_", class_i, "_draft",".pdf"),
     width=16, height=14)
 misses_heatmap
 dev.off()
