@@ -5,3 +5,9 @@
 .Rdata
 .httr-oauth
 .DS_Store
+
+# ignore folder for storing visualizations and tables
+/viz/
+
+# ignore data-specific files
+results_script.R
