@@ -21,16 +21,21 @@ output_dir <- "C:/Users/amira.burns/OneDrive - USDA/Projects/CameraTrapDetectoR/
 ## -- load and format data
 # load predictions
 preds <- utils::read.csv(paste0(output_dir, "/50epochs/pred_df_50epochs.csv"))
+preds <- dplyr::mutate(preds,
+                       class_name = ifelse(class_name == "vehicle", "Vehicle", 
+                                           ifelse(class_name == "empty", "Empty", class_name)))
 
 # load labels
 targets <- utils::read.csv(paste0(output_dir, "/target_df.csv"))
+targets <- dplyr::mutate(targets,
+                         class_name = ifelse(class_name == "vehicle", "Vehicle", class_name))
 
 # format label dictionary
 group_labs <- group_labels() 
 
 # set label order
 class_order <- group_labs$common.name.general
-pred_order <- c(unique(class_order[class_order %in% targets$class_name]), "empty")
+pred_order <- c(unique(class_order[class_order %in% targets$class_name]), "Empty")
 target_order <- unique(class_order[class_order %in% targets$class_name])
 
 # join fam names to targets
@@ -141,7 +146,12 @@ for(i in 1:length(target_order)){
   misclassed_plots[[i]] <- misclassed_heatmap(class_i = target_order[i], model_type = "species")
 }
 
-
+pdf(file=paste0(viz_path, model_type, "_v2_misclassification_heatmap.pdf"),
+    width=16, height=14)
+for(i in 1:length(families)){
+  print(misclassed_plots[[i]])
+}
+dev.off()
 
 
 

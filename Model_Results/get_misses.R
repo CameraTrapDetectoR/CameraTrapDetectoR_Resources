@@ -54,16 +54,8 @@ get_misses <- function(model_type) {
     
     misses <- misses %>%
       dplyr::left_join(higher_preds, by = join_by(prediction == family)) %>%
-      dplyr::mutate(prediction = factor(prediction, levels = rev(pred_order)))
-    
-    # handle missing joins
-    misses <- misses %>%
-      dplyr::mutate(prediction_order = ifelse(prediction == "Strigidae", "Strigiformes",
-                                              ifelse(prediction == "vehicle", "vehicle", prediction_order)),
-                    prediction_class = ifelse(prediction == "Strigidae", "Aves",
-                                              ifelse(prediction == "vehicle", "vehicle", prediction_class))) %>%
-      dplyr::mutate(prediction_order = factor(prediction_order, levels = rev(tax_order)))
-    
+      dplyr::mutate(prediction = factor(prediction, levels = rev(pred_order))) %>%
+      dplyr::mutate(prediction_order = factor(prediction_order, levels = c("Empty", rev(tax_order))))
   }
   
   if(model_type == "species"){

@@ -20,7 +20,7 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   
   # update prediction based on score_threshold
   pred_df <- pred_df %>% 
-    dplyr::mutate(prediction = ifelse(confidence < score_threshold, "empty", prediction))
+    dplyr::mutate(prediction = ifelse(confidence < score_threshold, "Empty", prediction))
   
   # join targets to preds
   df <- dplyr::left_join(pred_df, target_df, by = "filename")
@@ -88,17 +88,17 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia"))
   if(model_type == "family"){
     split_rows <- factor(df_wide$order, levels = unique(df_wide$order))
-    split_cols <- factor(c(df_wide$order, "empty"), levels = c(levels(split_rows), "empty"))
+    split_cols <- factor(c(df_wide$order, "Empty"), levels = c(levels(split_rows), "Empty"))
   }
   if(model_type == "species"){
     split_rows <- factor(df_wide$family, levels = unique(df_wide$family))
-    split_cols <- factor(c(df_wide$family, "empty"), levels = c(levels(split_rows), "empty"))
+    split_cols <- factor(c(df_wide$family, "Empty"), levels = c(levels(split_rows), "Empty"))
   }
 
   
   # set col/row order
   ordered_rows <- df_wide$class_name
-  ordered_cols <- c(ordered_rows, "empty")
+  ordered_cols <- c(ordered_rows, "Empty")
   
   # get accuracy metrics
   mets <- data.frame(class_name = df_wide$class_name,

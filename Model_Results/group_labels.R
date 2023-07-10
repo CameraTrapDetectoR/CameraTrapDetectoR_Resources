@@ -23,6 +23,9 @@ group_labels <- function(){
     mutate(family = ifelse(common.name.general == "Heron", "Ardeidae_Aramidae", family)) %>%
     distinct()
   
+  # change all higher order classifications for Vehicle
+  group_labs[group_labs[,"common.name.general"] == "Vehicle", c("family", "order","class")] <- "Vehicle"
+  
   # get species sort order from higher taxonomies
   group_labs <- group_labs %>%
     arrange(class, order, family, genus) 
@@ -30,8 +33,12 @@ group_labels <- function(){
     dplyr::select(-genus) %>%
     dplyr::distinct()
   
+  # add row for strigidae family
+  group_labs[nrow(group_labs)+1, ] <- c("Typical_owl", "Strigidae", "Strigiformes", "Aves")
+  
   # add row for empties
-  group_labs[nrow(group_labs)+1,] <- rep("empty", ncol(group_labs))
+  group_labs[nrow(group_labs)+1,] <- rep("Empty", ncol(group_labs))
+  
   
   return(group_labs)
 }

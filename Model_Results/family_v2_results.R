@@ -9,6 +9,7 @@ source(paste0(getwd(), "/Model_Results/group_labels.R"))
 source(paste0(getwd(), "/Model_Results/threshold_results.R"))
 source(paste0(getwd(), "/Model_Results/plot_df.R"))
 source(paste0(getwd(), "/Model_Results/get_misses.R"))
+source(paste0(getwd(), "/Model_Results/misclassed_heatmap.R"))
 
 # load libraries
 install_load("dplyr", "stringr", "ComplexHeatmap", "circlize", "ggplot2", "ggsci", "gridtext")
@@ -21,16 +22,22 @@ output_dir <- "C:/Users/amira.burns/OneDrive - USDA/Projects/CameraTrapDetectoR/
 ## -- load and format data
 # load predictions
 preds <- utils::read.csv(paste0(output_dir, "/pred_df_50epochs.csv"))
+preds <- dplyr::mutate(preds,
+                       class_name = ifelse(class_name == "vehicle", "Vehicle", 
+                                           ifelse(class_name == "empty", "Empty", class_name)))
 
 # load labels
 targets <- utils::read.csv(paste0(output_dir, "/target_df.csv"))
+targets <- dplyr::mutate(targets,
+                         class_name = ifelse(class_name == "vehicle", "Vehicle", class_name))
 
 # format label dictionary
 group_labs <- group_labels()
+group_labs <- group_labs[complete.cases(group_labs),]
 
 # set label orders
 class_order <- unique(group_labs$family)
-pred_order <- c(unique(class_order[class_order %in% targets$class_name]), "empty")
+pred_order <- c(unique(class_order[class_order %in% targets$class_name]), "Empty")
 target_order <- unique(class_order[class_order %in% targets$class_name])
 
 # join fam names to targets
@@ -45,7 +52,6 @@ pred_df <- dplyr::select(pred_df, c(filename, prediction, confidence))
 target_df <- targets %>% select(-c(X, bbox)) %>% distinct()
 
 # Run the metrics function at different score_thresholds
-
 results_full <- threshold_results(target_df, pred_df, 0, "family")
 results_20 <- threshold_results(target_df, pred_df, 0.20, "family")
 results_30 <- threshold_results(target_df, pred_df, 0.30, "family")
@@ -126,75 +132,22 @@ color_factor <- paletteer::paletteer_d("ggsci::default_igv")
 color_factor <- sample(color_factor, size = length(order_factor), replace = FALSE)
 col_dict <- data.frame(pred_order = order_factor, col = color_factor)
 
+# collect heatmaps
+families <- unique(misses$class_name)
+misses_heatmap <- list()
 
-
-# build out heatmap with example family
-class_i <- "Aramidae"
-df <- misses %>% filter(class_name == "Aramidae")
-
-# pivot to wide format for heatmap
-df_mat <-  df %>% 
-  dplyr::select(-c(count, true_pos_rate, false_pos_rate, false_neg_rate)) %>% 
-  tidyr::pivot_wider(names_from = score_threshold, names_prefix = "score_", values_from = prop) %>%
-  dplyr::mutate(across(.cols = score_0.1:score_0.9, ~tidyr::replace_na(., 0))) %>%
-  dplyr::mutate(across(.cols = score_0.1:score_0.9, ~round(.*100, 3)))
-
-# sort df to standardized order 
-df_mat <- df_mat[match(c(target_order, "empty"), df_mat$prediction),]
-df_mat <- df_mat[complete.cases(df_mat),]
-
-# join color scheme to df_mat
-df_mat <- df_mat %>%
-  dplyr::left_join(col_dict, by = join_by(prediction_order == pred_order))
-
-# create matrix of proportion values
-prop_mat <- as.matrix(df_mat[,7:15])
-rownames(prop_mat) <- df_mat$prediction
-
-# set taxonomic order as row splits, set col and row order
-split_rows <- factor(df_mat$prediction_order, levels = unique(df_mat$prediction_order))
-ordered_rows <- as.factor(df_mat$prediction)
-ordered_cols <- colnames(prop_mat)
-
-# create below-plot annotation for true pos rate
-true_pos_sidebar <- df %>%
-  dplyr::select(c(order, class_name, score_threshold, true_pos_rate)) %>%
-  dplyr::distinct()
-bottom_annotation = ComplexHeatmap::columnAnnotation(bar = ComplexHeatmap::anno_lines(c(true_pos_sidebar$true_pos_rate),
-                                                                                      ylim=c(0, 1),
-                                                                                      gp = gpar(fill = "#707091", border=NA, lty="blank"),
-                                                                                      axis_param = list(
-                                                                                        gp=gpar(fontsize=10),
-                                                                                        at=c(0, 0.5, 1), 
-                                                                                        labels=c(0, 0.5, 1))),
-                                                     show_annotation_name=TRUE,
-                                                     annotation_label = c("True Positive Rate"),
-                                                     annotation_name_side ="right",
-                                                     annotation_name_rot=0)
-
-misses_heatmap <- ComplexHeatmap::Heatmap(prop_mat, name = "Proportion", rect_gp = gpar(type = "none"),
-                                          cluster_columns=FALSE, cluster_rows=FALSE,
-                                          column_names_side = "bottom", row_names_side = "left",
-                                          column_title = gt_render(
-                                            paste0("<span style='font-size:18pt; color:black'>Family Model V2 Misclassification Matrix</span>", 
-                                                   "<br>Family = ", class_i)),
-                                          #row_order = ordered_rows, column_order = ordered_cols,
-                                          row_split = split_rows, row_title = "Misclassification",
-                                          cell_fun = function(j, i, x, y, width, height, fill){
-                                            grid.rect(x = x, y = y, width = width, height = height, 
-                                                      gp = gpar(col = "grey", fill = NA))
-                                            grid.circle(x = x, y = y, r = abs(prop_mat[i, j])/2 * min(unit.c(width, height)), 
-                                                        gp = gpar(fill = df_mat$color[i], col = NA))
-                                            
-                                          }, show_heatmap_legend = FALSE,
-                                          bottom_annotation = bottom_annotation)
+for(i in 1:length(families)){
+  misses_heatmap[[i]] <- misclassed_heatmap(families[i], model_type = "family")
+}
 
 
 # --- END
 
-pdf(file=paste0(viz_path, model_type, "_v2_misclassification_", class_i, "_draft",".pdf"),
+pdf(file=paste0(viz_path, model_type, "_v2_misclassification_heatmap.pdf"),
     width=16, height=14)
-misses_heatmap
+for(i in 1:length(families)){
+  print(misses_heatmap[[i]])
+}
 dev.off()
 
 
