@@ -33,8 +33,22 @@ misclassed_heatmap <- function(class_i, model_type) {
   }
   
   # sort df to standardized order 
-  df_mat <- df_mat[match(c(target_order, "empty"), df_mat$prediction),]
+  df_mat <- df_mat[match(c(target_order, "Empty"), df_mat$prediction),]
   df_mat <- df_mat[complete.cases(df_mat),]
+  
+  # ensure complete score threshold range for all classes
+  score_cols <- c("score_0.1", "score_0.2", "score_0.3", "score_0.4", "score_0.5",
+                  "score_0.6", "score_0.7", "score_0.8", "score_0.9")
+  scores_present <- colnames(df_mat)[startsWith(colnames(df_mat), "score") == TRUE]
+  scores_needed <- score_cols[which(score_cols %in% scores_present == FALSE)]
+  
+  if(length(scores_needed) > 0) {
+    score_df <- data.frame(matrix(rep(0, length(scores_needed)), nrow=1))
+    colnames(score_df) <- scores_needed
+    df_mat <- df_mat %>%
+      dplyr::bind_cols(score_df) %>%
+      dplyr::relocate(scores_needed[1]:scores_needed[length(scores_needed)], .after = prediction_class)
+  }
   
   # create matrix of proportion values
   prop_mat <- as.matrix(df_mat[,7:15])
@@ -47,14 +61,17 @@ misclassed_heatmap <- function(class_i, model_type) {
   
   # create below-plot annotation for true pos rate
 
-  sidebar <- df %>%
+  sidebar <- plot_df %>%
+    dplyr::filter(class == class_i) %>%
+    tidyr::pivot_wider(names_from = metric, values_from = rate) %>% 
+    dplyr::rename(class_name = class) %>%
     dplyr::select(c(class_name, score_threshold, true_pos_rate, false_pos_rate, false_neg_rate)) %>%
     dplyr::distinct()
 
   bottom_annotation = ComplexHeatmap::columnAnnotation(bar = ComplexHeatmap::anno_barplot(matrix(cbind(sidebar$true_pos_rate,
                                                                                                        sidebar$false_pos_rate,
                                                                                                        sidebar$false_neg_rate), ncol = 3),
-                                                                                          beside = TRUE, attach = TRUE,
+                                                                                          beside = TRUE, attach = TRUE, add_numbers = TRUE,
                                                                                         ylim=c(0, 1), 
                                                                                         gp = gpar(fill = c("#7F7F7F", "#B3B3B3", "#E3E3E3"), border=NA, lty="blank"),
                                                                                         axis_param = list(
