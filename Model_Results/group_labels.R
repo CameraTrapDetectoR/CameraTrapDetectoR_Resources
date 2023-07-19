@@ -21,10 +21,15 @@ group_labels <- function(){
     mutate(family = ifelse(common.name.general == "Mouse_Rat", "Muridae", family)) %>%
     mutate(family = ifelse(common.name.general == "Owl", "Tytonidae_Strigidae", family)) %>%
     mutate(family = ifelse(common.name.general == "Heron", "Ardeidae_Aramidae", family)) %>%
+    mutate(class = ifelse(common.name.general == "Human", "Human", class)) %>%
     distinct()
   
-  # change all higher order classifications for Vehicle
-  group_labs[group_labs[,"common.name.general"] == "Vehicle", c("family", "order","class")] <- "Vehicle"
+  # change all higher order classifications for Vehicle and human
+  group_labs[group_labs[,"common.name.general"] == "Vehicle", c("genus", "family", "order","class")] <- "Vehicle"
+  group_labs[group_labs[,"common.name.general"] == "Human", c("genus", "family", "order","class")] <- "Human"
+  
+  # add row for strigidae family
+  group_labs[nrow(group_labs)+1, ] <- c("Typical_owl", "Typical_Owl", "Strigidae", "Strigiformes", "Aves")
   
   # get species sort order from higher taxonomies
   group_labs <- group_labs %>%
@@ -33,8 +38,8 @@ group_labels <- function(){
     dplyr::select(-genus) %>%
     dplyr::distinct()
   
-  # add row for strigidae family
-  group_labs[nrow(group_labs)+1, ] <- c("Typical_owl", "Strigidae", "Strigiformes", "Aves")
+  # update order for human
+  group_labs <- group_labs %>% arrange(common.name.general == "Human", .before = "Vehicle")
   
   # add row for empties
   group_labs[nrow(group_labs)+1,] <- rep("Empty", ncol(group_labs))

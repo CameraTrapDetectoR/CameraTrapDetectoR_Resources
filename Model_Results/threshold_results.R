@@ -84,8 +84,9 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   prop_mat <- round(mat / target_counts, 4)
   rownames(prop_mat) <- target_order
   
-  # set family name as col/row splits
-  class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia"))
+  # set next higher tax name as col/row splits
+  class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia", "Human", "Vehicle"))
+  
   if(model_type == "family"){
     split_rows <- factor(df_wide$order, levels = unique(df_wide$order))
     split_cols <- factor(c(df_wide$order, "Empty"), levels = c(levels(split_rows), "Empty"))
@@ -152,8 +153,32 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   
   rep.col<-"darkolivegreen2"
   names(rep.col)<-vec
+  
+  if(model_type == "species"){
+    vec<-unique(df_wide[df_wide$class=="Human","family"])
+  }
+  if(model_type == "family"){
+    vec<-unique(df_wide[df_wide$class=="Human","order"])
+  }
+  
+  vec<-vec[is.na(vec)==FALSE]
+  
+  hum.col<-"maroon2"
+  names(hum.col)<-vec
+  
+  if(model_type == "species"){
+    vec<-unique(df_wide[df_wide$class=="Vehicle","family"])
+  }
+  if(model_type == "family"){
+    vec<-unique(df_wide[df_wide$class=="Vehicle","order"])
+  }
+  
+  vec<-vec[is.na(vec)==FALSE]
+  
+  veh.col<-"maroon3"
+  names(veh.col)<-vec
     
-  group_col<-c(aves.col,mam.col,rep.col)
+  group_col<-c(aves.col, mam.col, rep.col, hum.col, veh.col)
   
   spec_col <- circlize::colorRamp2(c(0, 0.1, 0.5, 0.8, 1), c("wheat2", "snow", "skyblue", "slateblue2", "darkorchid4"))
   # create sidebar annotations
@@ -166,7 +191,8 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
                            "Family"),
       annotation_name_side ="top",
       show_legend =FALSE,
-      col = list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4", "Reptilia" = "darkolivegreen4"),
+      col = list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4", "Reptilia" = "darkolivegreen4",
+                         "Human" = "maroon4", "Vehicle" = "maroon4"),
                  Family= group_col),
       gap = unit(c(1), "mm")
     )
@@ -180,7 +206,8 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
                            "Order"),
       annotation_name_side ="top",
       show_legend =FALSE,
-      col = list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4", "Reptilia" = "darkolivegreen4"),
+      col = list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4", "Reptilia" = "darkolivegreen4",
+                         "Human" = "maroon4", "Vehicle" = "maroon4"),
                  Order = group_col),
       gap = unit(c(1), "mm")
     )
