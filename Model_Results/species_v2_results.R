@@ -48,7 +48,6 @@ pred_df <- dplyr::rename(preds, prediction = class_name)
 pred_df <- dplyr::select(pred_df, c(filename, prediction, confidence))
 target_df <- targets %>% select(-c(X, file_id, bbox)) %>% distinct()
 
-
 # Run the metrics function at different score_thresholds
 results_full <- threshold_results(target_df, pred_df, 0, "species")
 results_20 <- threshold_results(target_df, pred_df, 0.20, "species")
@@ -60,14 +59,34 @@ results_70 <- threshold_results(target_df, pred_df, 0.70, "species")
 results_80 <- threshold_results(target_df, pred_df, 0.80, "species")
 results_90 <- threshold_results(target_df, pred_df, 0.90, "species")
 
+# run loop of smaller increments of score threshold 
+finer_metrics <- list()
+finer_cts <- list()
+for(i in seq(0.4, 0.90, 0.01)){
+  results <- threshold_results(target_df, pred_df, i, "species")
+  finer_metrics[i] <- results$metrics
+}
+
 # set path to visualization directory
 viz_path <- paste0(getwd(), "/Viz/")
 
 # save confusion matrix as pdf
+heatmaps <- list(results_full$heatmap,
+                 results_20$heatmap,
+                 results_30$heatmap,
+                 results_40$heatmap,
+                 results_50$heatmap,
+                 results_60$heatmap,
+                 results_70$heatmap,
+                 results_80$heatmap,
+                 results_90$heatmap)
+
 # Note: manually update score_threshold in name
-pdf(file=paste0(viz_path, "species_v2_heatmap_", "0.9_score_threshold",".pdf"),
+pdf(file=paste0(viz_path, "species_v2_heatmaps.pdf"),
     width=16, height=14)
-results_90$heatmap
+for(i in 1:length(heatmaps)){
+  print(heatmaps[[i]])
+}
 dev.off()
 
 
@@ -122,6 +141,32 @@ for(i in 1:length(families)){
 }
 dev.off()
 
+# Plot delta of each metric across classes to look for patterns
+
+delta_df <- plot_df %>%
+  group_by(metric, class) %>%
+  mutate(rate = round(rate, 3)) %>%
+  mutate(rate_delta = rate - lag(rate, default = rate[1]),
+         metric = ifelse(metric == "true_pos_rate", "True Positive Rate",
+                         ifelse(metric == "false_pos_rate", "False Positive Rate", "False Negative Rate")))
+
+
+
+delta_plot <- ggplot(delta_df, aes(x = score_threshold, y = rate_delta, group = class)) + 
+  geom_line(aes(col = family), lwd = 1.1, alpha = 0.7) + 
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.1)) + 
+  theme_bw() + 
+  facet_wrap(vars(metric)) +
+  scale_color_igv() +
+  labs(x = "Score Threshold", y = "Rate Cahnge", title = "Change in Evaluation Rate by Score Threshold Across Species")
+
+# save plots to pdf
+pdf(file=paste0(viz_path, "speciesv2_metric_deltas_by_score_threshold.pdf"),
+    width=12, height=10)
+delta_plot
+dev.off()
+
+
 ## -- track misclassifications
 
 # format misses df
@@ -145,11 +190,11 @@ misclassed_plots <- list()
 for(i in 1:length(target_order)){
   misclassed_plots[[i]] <- misclassed_heatmap(class_i = target_order[i], model_type = "species")
 }
-
+  
 pdf(file=paste0(viz_path, model_type, "_v2_misclassification_heatmap.pdf"),
     width=16, height=14)
-for(i in 1:length(families)){
-  print(misclassed_plots[[i]])
+for(i in 1:length(target_order)){
+  draw(misclassed_plots[[i]]$heatmap, annotation_legend_list = misclassed_plots[[i]]$legend, annotation_legend_side = "bottom")
 }
 dev.off()
 

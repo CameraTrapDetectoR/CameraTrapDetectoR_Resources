@@ -69,14 +69,23 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
     df_wide <- df_wide[match(target_order, df_wide$class_name), ]
     df_wide <- df_wide[, c("class", "order", "class_name", pred_order)]
   }
-
   
+  if(model_type == "general"){
+    # reorder cols and rows
+    df_wide <- df_wide[match(target_order, df_wide$class_name), ]
+    df_wide <- df_wide[ , c("class_name", pred_order)]
+  }
+
   # replace NA values with 0
   df_wide <- df_wide %>% mutate_all(~replace(., is.na(.), 0))
   
   # get count row and col sums
   N <- ncol(df_wide)
-  mat <- as.matrix(df_wide[,4:N])
+  if(model_type == "general"){
+    mat <- as.matrix(df_wide[,2:N])
+  } else {
+    mat <- as.matrix(df_wide[,4:N])
+  }
   target_counts <- rowSums(mat)
   pred_counts <- colSums(mat)
   
@@ -85,21 +94,28 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   rownames(prop_mat) <- target_order
   
   # set next higher tax name as col/row splits
-  class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia", "Human", "Vehicle"))
-  
   if(model_type == "family"){
+    class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia", "Human", "Vehicle"))
     split_rows <- factor(df_wide$order, levels = unique(df_wide$order))
     split_cols <- factor(c(df_wide$order, "Empty"), levels = c(levels(split_rows), "Empty"))
   }
   if(model_type == "species"){
+    class_split_rows <- factor(df_wide$class, levels = c("Aves", "Mammalia", "Reptilia", "Human", "Vehicle"))
     split_rows <- factor(df_wide$family, levels = unique(df_wide$family))
     split_cols <- factor(c(df_wide$family, "Empty"), levels = c(levels(split_rows), "Empty"))
   }
-
+  if(model_type == "general"){
+    class_split_rows <- factor(df_wide$class_name, levels = c("Aves", "Mammalia", "Reptilia", "Human", "Vehicle"))
+    split_rows <- factor(rownames(prop_mat), levels = rownames(prop_mat))
+    split_cols <- factor(colnames(df_wide)[-1], levels = colnames(df_wide)[-1])
+  }
   
   # set col/row order
   ordered_rows <- df_wide$class_name
   ordered_cols <- c(ordered_rows, "Empty")
+  if(model_type == "general"){
+    ordered_cols <- factor(colnames(df_wide)[-1])
+  }
   
   # get accuracy metrics
   mets <- data.frame(class_name = df_wide$class_name,
@@ -114,73 +130,80 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
     dplyr::mutate(false_neg_rate = false_neg / ct_total)
   
   # set color scheme
-  if(model_type == "species"){
-    vec<-unique(df_wide[df_wide$class=="Aves","family"])
-  }
-  if(model_type == "family"){
-    vec<-unique(df_wide[df_wide$class=="Aves","order"])
-  }
-
-  vec<-vec[is.na(vec)==FALSE]
-  
-  palette<-colorRampPalette(c("royalblue4","slategray2"))
-  aves.col<-palette(length(vec))
-  aves.col<-sample(aves.col)
-  names(aves.col)<-vec
-  
-  if(model_type == "species"){
-    vec<-unique(df_wide[df_wide$class=="Mammalia","family"])
-  }
-  if(model_type == "family"){
-    vec<-unique(df_wide[df_wide$class=="Mammalia","order"])
-  }
-  
-  vec<-vec[is.na(vec)==FALSE]
-  
-  palette<-colorRampPalette(c("chocolate4","peachpuff"))
-  mam.col<-palette(length(vec))
-  mam.col<-sample(mam.col)
-  names(mam.col)<-vec
-  
-  if(model_type == "species"){
-    vec<-unique(df_wide[df_wide$class=="Reptilia","family"])
-  }
-  if(model_type == "family"){
-    vec<-unique(df_wide[df_wide$class=="Reptilia","order"])
-  }
-
-  vec<-vec[is.na(vec)==FALSE]
-  
-  rep.col<-"darkolivegreen2"
-  names(rep.col)<-vec
-  
-  if(model_type == "species"){
-    vec<-unique(df_wide[df_wide$class=="Human","family"])
-  }
-  if(model_type == "family"){
-    vec<-unique(df_wide[df_wide$class=="Human","order"])
-  }
-  
-  vec<-vec[is.na(vec)==FALSE]
-  
-  hum.col<-"maroon2"
-  names(hum.col)<-vec
-  
-  if(model_type == "species"){
-    vec<-unique(df_wide[df_wide$class=="Vehicle","family"])
-  }
-  if(model_type == "family"){
-    vec<-unique(df_wide[df_wide$class=="Vehicle","order"])
-  }
-  
-  vec<-vec[is.na(vec)==FALSE]
-  
-  veh.col<-"maroon3"
-  names(veh.col)<-vec
+  if(model_type == "general"){
+    class_col <- list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4",
+                              "Human" = "maroon3", "Vehicle" = "maroon4"))
+  } else{
+    if(model_type == "species"){
+      vec<-unique(df_wide[df_wide$class=="Aves","family"])
+    }
+    if(model_type == "family"){
+      vec<-unique(df_wide[df_wide$class=="Aves","order"])
+    }
     
-  group_col<-c(aves.col, mam.col, rep.col, hum.col, veh.col)
+    vec<-vec[is.na(vec)==FALSE]
+    
+    palette<-colorRampPalette(c("royalblue4","slategray2"))
+    aves.col<-palette(length(vec))
+    aves.col<-sample(aves.col)
+    names(aves.col)<-vec
+    
+    if(model_type == "species"){
+      vec<-unique(df_wide[df_wide$class=="Mammalia","family"])
+    }
+    if(model_type == "family"){
+      vec<-unique(df_wide[df_wide$class=="Mammalia","order"])
+    }
+    
+    vec<-vec[is.na(vec)==FALSE]
+    
+    palette<-colorRampPalette(c("chocolate4","peachpuff"))
+    mam.col<-palette(length(vec))
+    mam.col<-sample(mam.col)
+    names(mam.col)<-vec
+    
+    if(model_type == "species"){
+      vec<-unique(df_wide[df_wide$class=="Reptilia","family"])
+    }
+    if(model_type == "family"){
+      vec<-unique(df_wide[df_wide$class=="Reptilia","order"])
+    }
+    
+    vec<-vec[is.na(vec)==FALSE]
+    
+    rep.col<-"darkolivegreen2"
+    names(rep.col)<-vec
+    
+    if(model_type == "species"){
+      vec<-unique(df_wide[df_wide$class=="Human","family"])
+    }
+    if(model_type == "family"){
+      vec<-unique(df_wide[df_wide$class=="Human","order"])
+    }
+    
+    vec<-vec[is.na(vec)==FALSE]
+    
+    hum.col<-"maroon2"
+    names(hum.col)<-vec
+    
+    if(model_type == "species"){
+      vec<-unique(df_wide[df_wide$class=="Vehicle","family"])
+    }
+    if(model_type == "family"){
+      vec<-unique(df_wide[df_wide$class=="Vehicle","order"])
+    }
+    
+    vec<-vec[is.na(vec)==FALSE]
+    
+    veh.col<-"maroon3"
+    names(veh.col)<-vec
+      
+    group_col<-c(aves.col, mam.col, rep.col, hum.col, veh.col)
+  }
   
+  # set heatmap proportion colors
   spec_col <- circlize::colorRamp2(c(0, 0.1, 0.5, 0.8, 1), c("wheat2", "snow", "skyblue", "slateblue2", "darkorchid4"))
+  
   # create sidebar annotations
   if(model_type == "species"){
     left_annotation = ComplexHeatmap::rowAnnotation(
@@ -209,6 +232,17 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
       col = list(Class=c("Aves" = "royalblue4", "Mammalia" = "chocolate4", "Reptilia" = "darkolivegreen4",
                          "Human" = "maroon4", "Vehicle" = "maroon4"),
                  Order = group_col),
+      gap = unit(c(1), "mm")
+    )
+  }
+  if(model_type == "general"){
+    left_annotation = ComplexHeatmap::rowAnnotation(
+      Class=class_split_rows,
+      show_annotation_name =TRUE,
+      annotation_label = "Class",
+      annotation_name_side ="top",
+      show_legend =FALSE,
+      col = class_col,
       gap = unit(c(1), "mm")
     )
   }
@@ -280,13 +314,34 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
                                         bottom_annotation=bottom_annotation
     )
   }
+  if(model_type == "general"){
+    heat_map <- ComplexHeatmap::Heatmap(prop_mat, name="Proportion", cluster_columns=FALSE, cluster_rows=FALSE,
+                                        column_names_side = "top", row_names_side = "left",
+                                        col = spec_col,
+                                        na_col = "white", 
+                                        # row_order = ordered_rows, 
+                                        # column_order = ordered_cols,
+                                        row_split = split_rows, column_split = split_cols,
+                                        row_title = "True Class", 
+                                        column_title = gt_render(
+                                          paste0("<span style='font-size:18pt; color:black'>General Model V2 Confusion Matrix</span>", 
+                                                 "<br>Score Threshold = ", score_threshold,
+                                                 "<br><br>Predicted Class"),
+                                          r = unit(2, "mm"), padding = unit(c(2, 2, 2, 2), "pt")),
+                                        row_names_gp = gpar(fontsize = 12),
+                                        row_gap = unit(0, "mm"), column_gap = unit(0, "mm"), border = TRUE,
+                                        left_annotation=left_annotation,
+                                        right_annotation=right_annotation,
+                                        bottom_annotation=bottom_annotation
+    )
+  }
     
     
-    # save outputs in a list and return as an object
-    results_object <- list(df_counts = df_ct,
-                           df_wide = df_wide,
-                           metrics = mets,
-                           heatmap = heat_map)
-    
-    return(results_object)
+  # save outputs in a list and return as an object
+  results_object <- list(df_counts = df_ct,
+                         df_wide = df_wide,
+                         metrics = mets,
+                         heatmap = heat_map)
+  
+  return(results_object)
 }

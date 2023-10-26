@@ -29,6 +29,10 @@ misclassed_heatmap <- function(class_i, model_type) {
     df_mat <- df_mat %>%
       dplyr::left_join(col_dict, by = join_by(prediction_family == family))
   }
+  if(model_type == "general"){
+    df_mat <- df_mat %>%
+      dplyr::left_join(col_dict, by = join_by(prediction == class))
+  }
   
   # sort df to standardized order 
   df_mat <- df_mat[match(pred_order, df_mat$prediction),]
@@ -39,9 +43,11 @@ misclassed_heatmap <- function(class_i, model_type) {
     split_rows <- factor(df_mat$prediction_order, levels = rev(levels(df_mat$prediction_order)))
   }
   if(model_type == "species"){
-    split_rows <- factor(df_mat$prediction_family, levels = rev(levels(df_mat$prediction_family)))
+    split_rows <- factor(df_mat$prediction_family, levels = unique(df_mat$prediction_family))
   }
-  
+  if(model_type == "general"){
+    split_rows <- factor(df_mat$prediction, levels = unique(df_mat$prediction))
+  }
   
   # ensure complete score threshold range for all classes
   score_cols <- c("score_0.1", "score_0.2", "score_0.3", "score_0.4", "score_0.5",
@@ -58,12 +64,17 @@ misclassed_heatmap <- function(class_i, model_type) {
   }
   
   # create matrix of proportion values
-  prop_mat <- as.matrix(df_mat[,7:15])
+  if(model_type == "general"){
+    prop_mat <- as.matrix(df_mat[,3:11])
+  } else{
+    prop_mat <- as.matrix(df_mat[,7:15])
+  }
   rownames(prop_mat) <- gsub("_", " ", df_mat$prediction)
   colnames(prop_mat) <- c("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9")
   
   # set  col and row order
   ordered_rows <- rev(pred_order[pred_order %in% df_mat$prediction])
+  # levels(ordered_rows) <- unique(ordered_rows)
   ordered_cols <- colnames(prop_mat)
   
   # create below-plot annotation for eval metrics
@@ -97,7 +108,7 @@ misclassed_heatmap <- function(class_i, model_type) {
   
   
   # Get total number test targets
-  test_n <- nrow(targets[target_df$class_name == class_i,])
+  test_n <- nrow(target_df[target_df$class_name == class_i,])
   
   hmap <- ComplexHeatmap::Heatmap(prop_mat, name = "Proportion", rect_gp = gpar(type = "none"),
                                             column_title = gt_render(
@@ -107,7 +118,7 @@ misclassed_heatmap <- function(class_i, model_type) {
                                                      "<br>", "Test Images = ", test_n)),
                                             cluster_columns=FALSE, cluster_rows=FALSE, row_names_side = "left",
                                             column_names_side = "bottom", column_names_rot = 45,
-                                            row_order = ordered_rows, 
+                                            #row_order = ordered_rows, 
                                             row_split = split_rows, border = TRUE,
                                             row_title = "Misclassification",
                                             cell_fun = function(j, i, x, y, width, height, fill){
@@ -122,6 +133,7 @@ misclassed_heatmap <- function(class_i, model_type) {
                                             bottom_annotation = bottom_annotation)
   
   # put heatmap and legend together in a list
+  maplist <- list()
   maplist$heatmap <- hmap
   maplist$legend <- lgd
   

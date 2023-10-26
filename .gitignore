@@ -10,4 +10,7 @@
 /viz/
 
 # ignore data-specific files
-results_script.R
+/Model_Results/results_script.R
+/Model_Results/family_v2_results.R
+/Model_Results/general_v2_results.R
+/Model_Results/species_v2_results.R

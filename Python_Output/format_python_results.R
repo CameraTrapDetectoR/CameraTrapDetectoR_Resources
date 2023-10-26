@@ -65,7 +65,7 @@ format_python_results <- function(df){
   
   # add columns for ground truth classes and counts
   preds <- preds %>%
-    mutate(true_class = "", true_count = "", Comments = "")
+    mutate(true_class = "", true_count = "", comments = "")
   
   return(preds)
 }

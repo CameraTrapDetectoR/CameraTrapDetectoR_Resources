@@ -24,6 +24,8 @@ get_misses <- function(model_type) {
     
     # filter out correct preds and sum totals
     misses_df <- df %>% 
+      dplyr::mutate(class_name = as.character(class_name),
+                    prediction = as.character(prediction)) %>%
       dplyr::filter(class_name != prediction) %>%
       dplyr::select(-total)
     
@@ -64,7 +66,8 @@ get_misses <- function(model_type) {
     
     misses <- misses %>%
       dplyr::left_join(higher_preds, by = join_by(prediction == common.name.general)) %>%
-      dplyr::mutate(prediction = factor(prediction, levels = rev(pred_order)))
+      dplyr::mutate(prediction = factor(prediction, levels = rev(pred_order))) %>%
+      dplyr::mutate(prediction_family = factor(prediction_family, levels = c("Empty", rev(families))))
   }
   
   # add true pos rate to plot on secondary axis

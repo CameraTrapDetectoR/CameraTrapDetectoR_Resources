@@ -24,12 +24,14 @@ output_dir <- "C:/Users/amira.burns/OneDrive - USDA/Projects/CameraTrapDetectoR/
 preds <- utils::read.csv(paste0(output_dir, "/pred_df_50epochs.csv"))
 preds <- dplyr::mutate(preds,
                        class_name = ifelse(class_name == "vehicle", "Vehicle", 
-                                           ifelse(class_name == "empty", "Empty", class_name)))
+                                           ifelse(class_name == "empty", "Empty", class_name)),
+                       class_name = ifelse(class_name == "Hominidae", "Human", class_name))
 
 # load labels
 targets <- utils::read.csv(paste0(output_dir, "/target_df.csv"))
 targets <- dplyr::mutate(targets,
-                         class_name = ifelse(class_name == "vehicle", "Vehicle", class_name))
+                         class_name = ifelse(class_name == "vehicle", "Vehicle", class_name),
+                         class_name = ifelse(class_name == "Hominidae", "Human", class_name))
 
 # format label dictionary
 group_labs <- group_labels()
@@ -66,10 +68,22 @@ results_90 <- threshold_results(target_df, pred_df, 0.90, "family")
 viz_path <- paste0(getwd(), "/Viz/")
 
 # save confusion matrix as pdf
+heatmaps <- list(results_full$heatmap,
+                 results_20$heatmap,
+                 results_30$heatmap,
+                 results_40$heatmap,
+                 results_50$heatmap,
+                 results_60$heatmap,
+                 results_70$heatmap,
+                 results_80$heatmap,
+                 results_90$heatmap)
+
 # Note: manually update score_threshold in name
-pdf(file=paste0(viz_path, "family_v2_heatmap_", "0.9_score_threshold",".pdf"),
+pdf(file=paste0(viz_path, "family_v2_heatmaps.pdf"),
     width=16, height=14)
-results_90$heatmap
+for(i in 1:length(heatmaps)){
+  print(heatmaps[[i]])
+}
 dev.off()
 
 # combine metrics for plotting
@@ -122,6 +136,30 @@ for(i in 1:length(tax_order)){
 }
 dev.off()
 
+# Plot delta of each metric across classes to look for patterns
+
+delta_df <- plot_df %>%
+  group_by(metric, class) %>%
+  mutate(rate = round(rate, 3)) %>%
+  mutate(rate_delta = rate - lag(rate, default = rate[1]),
+         metric = ifelse(metric == "true_pos_rate", "True Positive Rate",
+                         ifelse(metric == "false_pos_rate", "False Positive Rate", "False Negative Rate")))
+
+delta_plot <- ggplot(delta_df, aes(x = score_threshold, y = rate_delta, group = class)) + 
+  geom_line(aes(col = order), lwd = 1.1, alpha = 0.7) + 
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.1)) + 
+  theme_bw() + 
+  facet_wrap(vars(metric)) +
+  scale_color_d3(palette = "category20") +
+  labs(x = "Score Threshold", y = "Rate Change", title = "Change in Evaluation Rate by Score Threshold Across Family")
+
+# save plots to pdf
+pdf(file=paste0(viz_path, "familyv2_metric_deltas_by_score_threshold.pdf"),
+    width=12, height=10)
+delta_plot
+dev.off()
+
+
 ## -- Track misclassifications
 
 misses <- get_misses(model_type = "family")
@@ -143,10 +181,10 @@ for(i in 1:length(families)){
 
 # --- END
 
-pdf(file=paste0(viz_path, model_type, "_v2_misclassification_heatmap.pdf"),
+pdf(file=paste0(viz_path, model_type='family', "_v2_misclassification_heatmap.pdf"),
     width=16, height=14)
 for(i in 1:length(families)){
-  print(misses_heatmap[[i]])
+  draw(misses_heatmap[[i]]$heatmap, annotation_legend_list = misses_heatmap[[i]]$legend, annotation_legend_side = "bottom")
 }
 dev.off()
 
