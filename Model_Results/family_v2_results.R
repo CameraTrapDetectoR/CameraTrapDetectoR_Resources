@@ -33,6 +33,7 @@ targets <- dplyr::mutate(targets,
                          class_name = ifelse(class_name == "vehicle", "Vehicle", class_name),
                          class_name = ifelse(class_name == "Hominidae", "Human", class_name))
 
+
 # format label dictionary
 group_labs <- group_labels()
 group_labs <- group_labs[complete.cases(group_labs),]
@@ -181,10 +182,12 @@ for(i in 1:length(families)){
 
 # --- END
 
+
 pdf(file=paste0(viz_path, model_type='family', "_v2_misclassification_heatmap.pdf"),
     width=16, height=14)
 for(i in 1:length(families)){
   draw(misses_heatmap[[i]]$heatmap, annotation_legend_list = misses_heatmap[[i]]$legend, annotation_legend_side = "bottom")
+
 }
 dev.off()
 

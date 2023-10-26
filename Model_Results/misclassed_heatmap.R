@@ -9,7 +9,7 @@
 #' 
 #' @export
 #' 
-misclassed_heatmap <- function(class_i, model_type) {
+misclassed_heatmap <- function(class_i, model_type) { 
   # filter df based on given class
   df <- misses %>% filter(class_name == class_i)
   
@@ -49,6 +49,7 @@ misclassed_heatmap <- function(class_i, model_type) {
     split_rows <- factor(df_mat$prediction, levels = unique(df_mat$prediction))
   }
   
+
   # ensure complete score threshold range for all classes
   score_cols <- c("score_0.1", "score_0.2", "score_0.3", "score_0.4", "score_0.5",
                   "score_0.6", "score_0.7", "score_0.8", "score_0.9")
@@ -77,7 +78,9 @@ misclassed_heatmap <- function(class_i, model_type) {
   # levels(ordered_rows) <- unique(ordered_rows)
   ordered_cols <- colnames(prop_mat)
   
-  # create below-plot annotation for eval metrics
+  
+  # create below-plot annotation for true pos rate
+
   sidebar <- plot_df %>%
     dplyr::filter(class == class_i) %>%
     tidyr::pivot_wider(names_from = metric, values_from = rate) %>% 
@@ -86,12 +89,13 @@ misclassed_heatmap <- function(class_i, model_type) {
     dplyr::distinct() %>%
     dplyr::mutate(across(true_pos_rate:false_neg_rate, ~round(., 2)))
 
-  bottom_annotation = ComplexHeatmap::HeatmapAnnotation(mt = ComplexHeatmap::anno_lines(matrix(cbind(sidebar$true_pos_rate,
-                                                                                                     sidebar$false_pos_rate,
-                                                                                                     sidebar$false_neg_rate), ncol = 3),
-                                                                                        ylim=c(0, 1), add_points = TRUE, height = unit(2.5, "cm"),
-                                                                                        pt_gp = gpar(pch = 16:18, col = c("#84BD00", "#5C88DA", "#CC0C00"), alpha = 0.5),
-                                                                                        gp = gpar(col = c("#84BD00", "#5C88DA", "#CC0C00"), lwd = 1.5),
+
+  bottom_annotation = ComplexHeatmap::columnAnnotation(bar = ComplexHeatmap::anno_barplot(matrix(cbind(sidebar$true_pos_rate,
+                                                                                                       sidebar$false_pos_rate,
+                                                                                                       sidebar$false_neg_rate), ncol = 3),
+                                                                                          beside = TRUE, attach = TRUE, add_numbers = TRUE,
+                                                                                        ylim=c(0, 1), 
+                                                                                        gp = gpar(fill = c("#7F7F7F", "#B3B3B3", "#E3E3E3"), border=NA, lty="blank"),
                                                                                         axis_param = list(
                                                                                           gp=gpar(fontsize=10),
                                                                                           at=seq(0, 1, 0.2), 

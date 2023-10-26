@@ -24,6 +24,7 @@ group_labels <- function(){
     mutate(class = ifelse(common.name.general == "Human", "Human", class)) %>%
     distinct()
   
+
   # change all higher order classifications for Vehicle and human
   group_labs[group_labs[,"common.name.general"] == "Vehicle", c("genus", "family", "order","class")] <- "Vehicle"
   group_labs[group_labs[,"common.name.general"] == "Human", c("genus", "family", "order","class")] <- "Human"
@@ -40,7 +41,7 @@ group_labels <- function(){
   
   # update order for human
   group_labs <- group_labs %>% arrange(common.name.general == "Human", .before = "Vehicle")
-  
+
   # add row for empties
   group_labs[nrow(group_labs)+1,] <- rep("Empty", ncol(group_labs))
   

@@ -195,6 +195,7 @@ pdf(file=paste0(viz_path, model_type, "_v2_misclassification_heatmap.pdf"),
     width=16, height=14)
 for(i in 1:length(target_order)){
   draw(misclassed_plots[[i]]$heatmap, annotation_legend_list = misclassed_plots[[i]]$legend, annotation_legend_side = "bottom")
+
 }
 dev.off()
 

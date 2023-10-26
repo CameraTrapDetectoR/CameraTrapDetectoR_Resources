@@ -113,6 +113,7 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   # set col/row order
   ordered_rows <- df_wide$class_name
   ordered_cols <- c(ordered_rows, "Empty")
+
   if(model_type == "general"){
     ordered_cols <- factor(colnames(df_wide)[-1])
   }
