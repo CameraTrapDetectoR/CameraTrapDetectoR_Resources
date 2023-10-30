@@ -38,6 +38,7 @@ get_image_features <- function(df) {
   ymin_col <- colnames(df)[grepl("ymin", colnames(df), ignore.case=T)][1]
   xmax_col <- colnames(df)[grepl("xmax", colnames(df), ignore.case=T)][1]
   ymax_col <- colnames(df)[grepl("ymax", colnames(df), ignore.case=T)][1]
+
   
   if(length(xmin_col)==0 | length(xmax_col)==0 | length(ymin_col)==0 | length(ymax_col)==0){
     print("Cannot identify bounding box coordinates. Image features will be calculated 
