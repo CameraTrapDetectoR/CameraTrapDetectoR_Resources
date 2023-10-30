@@ -19,6 +19,7 @@
 #' dataframe containing the character string 'file'. Bounding box coordinates should be in 
 #' four columns labeled according to the naming convention and formatting requirements detailed 
 #' in the `details` section.
+#' @param checkpoint_frequency save df to checkpoint every x rows. A csv file will be saved to working directory
 #' 
 #' @returns data frame with columns for the image file path, (optional) bounding box coordinates,
 #' and columns for each of the image features. 
@@ -30,7 +31,7 @@
 #' 
 #' @export
 #' 
-get_image_features <- function(df) {
+get_image_features <- function(df, checkpoint_frequency) {
   
   # extract relevant columns from df
   file_col <- colnames(df)[grepl("file", colnames(df), ignore.case=T)][1]
@@ -45,7 +46,7 @@ get_image_features <- function(df) {
           over the entire image.\n")
     input_df <- data.frame(img.path = df[ , file_col])
   } else {
-    input_df <- data.frame(img_path = df[ , file_col],
+    input_df <- data.frame(img.path = df[ , file_col],
                            xmin = df[, xmin_col],
                            ymin = df[, ymin_col],
                            xmax = df[, xmax_col],
@@ -66,70 +67,88 @@ get_image_features <- function(df) {
                               self.similarity = NA)
   
   # create progress bar
+  print("Running feature extraction")
   pb = utils::txtProgressBar(min = 0, max = nrow(feature_df), initial = 0,
                              style=3, char="*")
-  print("Running feature extraction")
-  
+
   # loop through feature df 
   for(i in 1:nrow(feature_df)){
     
-    # open image and get dimensions
-    img <- magick::image_read(feature_df$img.path[i])
+    # open image 
+    img <- tryCatch(magick::image_read(feature_df$img.path[i]), 
+                    error = function(e) "error")
     
-    # get image dimensions
-    img_w <- magick::image_info(img)$width
-    img_h <- magick::image_info(img)$height
-    
-    # feature extraction on bbox
-    if(all(c("xmin", "ymin", "xmax", "ymax") %in% colnames(feature_df))) {
-      # get box dimensions 
-      box_w <- (feature_df$xmax[i] - feature_df$xmin[i]) * img_w
-      box_h <- (feature_df$ymax[i] - feature_df$ymin[i]) * img_h
+    # manage errors
+    if("error" %in% list(img)) {
+      feature_df$aspect.ratio[i] <- "image error"
+      feature_df$complexity[i] <- "image error"
+      feature_df$contrast[i] <- "image error"
+      feature_df$v.symmetry[i] <- "image error"
+      feature_df$h.symmetry[i] <- "image error"
+      feature_df$self.similarity[i] <- "image error"
+    } else {
       
-      # calculate aspect ratio
-      feature_df$aspect.ratio[i] <- round(box_w / box_h, digits=3)
+      # get image dimensions
+      img_w <- magick::image_info(img)$width
+      img_h <- magick::image_info(img)$height
       
-      # crop image to bbox
-      bbox <- magick::image_crop(img, geometry = geometry_area(width=box_w, height=box_h, 
-                                                               x_off=feature_df$xmin[i]*img_w, 
-                                                               y_off=feature_df$ymin[i]*img_h))
+      # feature extraction on bbox
+      if(all(c("xmin", "ymin", "xmax", "ymax") %in% colnames(feature_df))) {
+        # get box dimensions 
+        box_w <- (feature_df$xmax[i] - feature_df$xmin[i]) * img_w
+        box_h <- (feature_df$ymax[i] - feature_df$ymin[i]) * img_h
+        
+        # calculate aspect ratio
+        feature_df$aspect.ratio[i] <- round(box_w / box_h, digits=3)
+        
+        # crop image to bbox
+        bbox <- magick::image_crop(img, geometry = geometry_area(width=box_w, height=box_h, 
+                                                                 x_off=feature_df$xmin[i]*img_w, 
+                                                                 y_off=feature_df$ymin[i]*img_h))
+        
+        # save bbox as jpg so it can be reloaded with imagefluency package
+        temp_path <- paste0(getwd(), "/temp_bbox.jpg")
+        magick::image_write(bbox, path = temp_path)
+        
+        # reload bbox
+        box_f <- imagefluency::img_read(temp_path)
+        
+        # add features to df
+        feature_df$complexity[i] <- imagefluency::img_complexity(temp_path)
+        feature_df$contrast[i] <- imagefluency::img_contrast(box_f)
+        feature_df$v.symmetry[i] <- imagefluency::img_symmetry(box_f)[['vertical']]
+        feature_df$h.symmetry[i] <- imagefluency::img_symmetry(box_f)[['horizontal']]
+        feature_df$self.similarity[i] <- imagefluency::img_self_similarity(box_f)
+        
+        #remove temp file
+        #file.remove(temp_path)
+      } 
       
-      # save bbox as jpg so it can be reloaded with imagefluency package
-      temp_path <- paste0(getwd(), "/temp_bbox.jpg")
-      magick::image_write(box, path = temp_path)
-      
-      # reload bbox
-      box_f <- imagefluency::img_read(temp_path)
-      
-      # add features to df
-      feature_df$complexity[i] <- imagefluency::img_complexity(temp_path)
-      feature_df$contrast[i] <- imagefluency::img_contrast(box_f)
-      feature_df$v.symmetry[i] <- imagefluency::img_symmetry(box_f)[['vertical']]
-      feature_df$h.symmetry[i] <- imagefluency::img_symmetry(box_f)[['horizontal']]
-      feature_df$self.similarity[i] <- imagefluency::img_self_similarity(box_f)
-      
-      #remove temp file
-      file.remove(temp_path)
-    } 
-    
-    # extract features for a full image
-    else {
-      
-      # open image using imagefluency
-      img_f <- imagefluency::img_read(feature_df$img.path[i])
-      
-      # extract features and add to df
-      feature_df$aspect.ratio[i] <- round(img_w / img_h, digits=3)
-      feature_df$complexity[i] <- imagefluency::img_complexity(feature_df$img.path[i])
-      feature_df$contrast[i] <- imagefluency::img_contrast(img_f)
-      feature_df$v.symmetry[i] <- imagefluency::img_symmetry(img_f)[['vertical']]
-      feature_df$h.symmetry[i] <- imagefluency::img_symmetry(img_f)[['horizontal']]
-      feature_df$self.similarity[i] <- imagefluency::img_self_similarity(img_f)
-      
+      # extract features for a full image
+      if(all(c("xmin", "ymin", "xmax", "ymax") %in% colnames(feature_df))==FALSE) {
+        
+        # open image using imagefluency
+        img_f <- imagefluency::img_read(feature_df$img.path[i])
+        
+        # extract features and add to df
+        feature_df$aspect.ratio[i] <- round(img_w / img_h, digits=3)
+        feature_df$complexity[i] <- imagefluency::img_complexity(feature_df$img.path[i])
+        feature_df$contrast[i] <- imagefluency::img_contrast(img_f)
+        feature_df$v.symmetry[i] <- imagefluency::img_symmetry(img_f)[['vertical']]
+        feature_df$h.symmetry[i] <- imagefluency::img_symmetry(img_f)[['horizontal']]
+        feature_df$self.similarity[i] <- imagefluency::img_self_similarity(img_f)
+        
+      }
     }
     
     # update progress bar
     utils::setTxtProgressBar(pb,i) 
+    
+    # save checkpoint
+    if(i %% checkpoint_frequency == 0){
+      utils::write.csv(feature_df, paste0(getwd(), "get_image_features_checkpoint.csv"))
+    }
+    
   }
   
   return(feature_df)
