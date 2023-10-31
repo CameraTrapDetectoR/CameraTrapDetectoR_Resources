@@ -67,7 +67,7 @@ get_image_features <- function(df, checkpoint_frequency) {
                               self.similarity = NA)
   
   # create progress bar
-  print("Running feature extraction")
+  print(paste0("Running feature extraction on ", nrow(feature_df), "images or bboxes.\n"))
   pb = utils::txtProgressBar(min = 0, max = nrow(feature_df), initial = 0,
                              style=3, char="*")
 
