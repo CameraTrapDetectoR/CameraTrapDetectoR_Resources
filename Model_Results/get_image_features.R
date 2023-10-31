@@ -67,7 +67,7 @@ get_image_features <- function(df, checkpoint_frequency) {
                               self.similarity = NA)
   
   # create progress bar
-  print(paste0("Running feature extraction on ", nrow(feature_df), "images or bboxes.\n"))
+  print(paste0("Running feature extraction on ", nrow(feature_df), " images or bboxes."))
   pb = utils::txtProgressBar(min = 0, max = nrow(feature_df), initial = 0,
                              style=3, char="*")
 
@@ -118,7 +118,8 @@ get_image_features <- function(df, checkpoint_frequency) {
         feature_df$contrast[i] <- imagefluency::img_contrast(box_f)
         feature_df$v.symmetry[i] <- imagefluency::img_symmetry(box_f)[['vertical']]
         feature_df$h.symmetry[i] <- imagefluency::img_symmetry(box_f)[['horizontal']]
-        feature_df$self.similarity[i] <- imagefluency::img_self_similarity(box_f)
+        feature_df$self.similarity[i] <- tryCatch(imagefluency::img_self_similarity(box_f),
+                                                  error = function(e) NA)
         
         #remove temp file
         #file.remove(temp_path)
@@ -136,7 +137,8 @@ get_image_features <- function(df, checkpoint_frequency) {
         feature_df$contrast[i] <- imagefluency::img_contrast(img_f)
         feature_df$v.symmetry[i] <- imagefluency::img_symmetry(img_f)[['vertical']]
         feature_df$h.symmetry[i] <- imagefluency::img_symmetry(img_f)[['horizontal']]
-        feature_df$self.similarity[i] <- imagefluency::img_self_similarity(img_f)
+        feature_df$self.similarity[i] <- tryCatch(imagefluency::img_self_similarity(img_f),
+                                                  error = function(e) NA)
         
       }
     }
@@ -146,7 +148,7 @@ get_image_features <- function(df, checkpoint_frequency) {
     
     # save checkpoint
     if(i %% checkpoint_frequency == 0){
-      utils::write.csv(feature_df, paste0(getwd(), "get_image_features_checkpoint.csv"))
+      utils::write.csv(feature_df, paste0(getwd(), "/get_image_features_checkpoint.csv"))
     }
     
   }
