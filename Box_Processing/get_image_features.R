@@ -80,12 +80,12 @@ get_image_features <- function(df, checkpoint_frequency) {
     
     # manage errors
     if("error" %in% list(img)) {
-      feature_df$aspect.ratio[i] <- "image error"
-      feature_df$complexity[i] <- "image error"
-      feature_df$contrast[i] <- "image error"
-      feature_df$v.symmetry[i] <- "image error"
-      feature_df$h.symmetry[i] <- "image error"
-      feature_df$self.similarity[i] <- "image error"
+      feature_df$aspect.ratio[i] <- NA
+      feature_df$complexity[i] <- NA
+      feature_df$contrast[i] <- NA
+      feature_df$v.symmetry[i] <- NA
+      feature_df$h.symmetry[i] <- NA
+      feature_df$self.similarity[i] <- NA
     } else {
       
       # get image dimensions

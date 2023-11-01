@@ -7,10 +7,14 @@
 .DS_Store
 # ignore folder for storing visualizations and tables
 /viz/
+
 # ignore data-specific files
 /Model_Results/results_script.R
 /Model_Results/family_v2_results.R
 /Model_Results/general_v2_results.R
 /Model_Results/species_v2_results.R
 results_script.R
-temp_bbox.jpg
+
+# ignore any data
+*.jpg
+*.csv
