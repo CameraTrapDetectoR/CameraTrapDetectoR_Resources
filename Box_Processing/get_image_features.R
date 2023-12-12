@@ -44,9 +44,9 @@ get_image_features <- function(df, checkpoint_frequency) {
   if(length(xmin_col)==0 | length(xmax_col)==0 | length(ymin_col)==0 | length(ymax_col)==0){
     print("Cannot identify bounding box coordinates. Image features will be calculated 
           over the entire image.\n")
-    input_df <- data.frame(img.path = df[ , file_col])
+    input_df <- data.frame(filename = df[ , file_col])
   } else {
-    input_df <- data.frame(img.path = df[ , file_col],
+    input_df <- data.frame(filename = df[ , file_col],
                            xmin = df[, xmin_col],
                            ymin = df[, ymin_col],
                            xmax = df[, xmax_col],
@@ -54,7 +54,7 @@ get_image_features <- function(df, checkpoint_frequency) {
   }
   
   # remove duplicate rows or any rows where there is no file path
-  input_df <- dplyr::filter(input_df, !is.na(img.path))
+  input_df <- dplyr::filter(input_df, !is.na(filename))
   input_df <- dplyr::distinct(input_df)
   
   # create df to store output
@@ -75,7 +75,7 @@ get_image_features <- function(df, checkpoint_frequency) {
   for(i in 1:nrow(feature_df)){
     
     # open image 
-    img <- tryCatch(magick::image_read(feature_df$img.path[i]), 
+    img <- tryCatch(magick::image_read(feature_df$filename[i]), 
                     error = function(e) "error")
     
     # manage errors
@@ -102,7 +102,7 @@ get_image_features <- function(df, checkpoint_frequency) {
         feature_df$aspect.ratio[i] <- round(box_w / box_h, digits=3)
         
         # crop image to bbox
-        bbox <- magick::image_crop(img, geometry = geometry_area(width=box_w, height=box_h, 
+        bbox <- magick::image_crop(img, geometry = magick::geometry_area(width=box_w, height=box_h, 
                                                                  x_off=feature_df$xmin[i]*img_w, 
                                                                  y_off=feature_df$ymin[i]*img_h))
         
@@ -129,11 +129,11 @@ get_image_features <- function(df, checkpoint_frequency) {
       if(all(c("xmin", "ymin", "xmax", "ymax") %in% colnames(feature_df))==FALSE) {
         
         # open image using imagefluency
-        img_f <- imagefluency::img_read(feature_df$img.path[i])
+        img_f <- imagefluency::img_read(feature_df$filename[i])
         
         # extract features and add to df
         feature_df$aspect.ratio[i] <- round(img_w / img_h, digits=3)
-        feature_df$complexity[i] <- imagefluency::img_complexity(feature_df$img.path[i])
+        feature_df$complexity[i] <- imagefluency::img_complexity(feature_df$filename[i])
         feature_df$contrast[i] <- imagefluency::img_contrast(img_f)
         feature_df$v.symmetry[i] <- imagefluency::img_symmetry(img_f)[['vertical']]
         feature_df$h.symmetry[i] <- imagefluency::img_symmetry(img_f)[['horizontal']]

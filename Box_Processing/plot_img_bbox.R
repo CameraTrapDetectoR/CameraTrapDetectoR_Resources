@@ -1,105 +1,74 @@
 #' Plot image with bounding box predictions
 #' 
-#' @description Create a copy of the original image with predicted bounding box 
-#' and, optionally, the predicted category plotted on the image copy. Helper
-#' function for `deploy_model`
+#' @description Create a copy of the original image with predicted bounding boxes,
+#' confidence scores, and class labels. Save copy to user-defined directory
 #' 
-#' @param filename The file containing the image
 #' @param pred_df Prediction dataframe that is output from deployment
 #' @param output_dir Desired directory to make plots
-#' @param data_dir absolute path to images
-#' @param plot_label boolean. Do you want the predicted category on the plot?
-#' @param prop_bbox boolean. Are the bbox coordinates in proportion instead of 
-#'  exact coordinates? Only `TRUE` if you are using a different image size
-#' @param h The image height (in pixels) for the annotated plot. Only used if
-#'  \code{make_plots=TRUE}. 
-#' @param w The image width (in pixels) for the annotated plot.
-#' @param col color of the bbox (and label if `plot_label=TRUE`). See `?plot` 
-#'  for an explanation of `col`, `lwd`, and `lty`
-#' @param lwd line width of bbox
-#' @param lty line type of bbox
 #' 
-#' @returns png image file in output_dir with bboxes and labels plotted
+#' @returns jpg image file in output_dir with bboxes and labels plotted
 #' 
 #' @import magick
 #' 
 #' @export
 #' 
-plot_img_bbox<- function(filename,
-                         pred_df,
-                         output_dir,
-                         data_dir,
-                         plot_label=TRUE,
-                         col="red",
-                         lty=1,
-                         lwd=2,
-                         prop_bbox = FALSE,
-                         w = 408, h=307){
+plot_img_bbox<- function(pred_df,
+                         output_dir){
   
-  # prop_bbox means that data are from megadetector, not from here, so 
-  # things are a little different in the file_list. 
-  filename_full <- ifelse(prop_bbox, file.path(data_dir, filename),
-                          filename)
-  img <- magick::image_read(filename_full)
-  img <- magick::image_scale(img, paste0(w, 'x', h, '!'))
+  # extract unique files
+  file_list <- unique(pred_df$filename)
   
+  # start progress bar
+  print(paste0("Plotting boxes on ", length(file_list), " images."))
+  pb = utils::txtProgressBar(min = 0, max = length(file_list), initial = 0,
+                             style=3, char="*")
   
-  # save file information
-  if(!endsWith(data_dir, "/")){
-    # add a slash to the end of data dir, for when I pull it from file name
-    data_dir <- paste0(data_dir, "/")
-  }
-  # I want to replace slashes with _ for those recursive files. This will 
-  # keep them all in the same place
-  stripped_filename <- tools::file_path_sans_ext(gsub("/", "_", gsub(data_dir, "", filename)))
-  output_nm <- file.path(output_dir, paste0(stripped_filename, ".png"))
-  
-  # when using megadetector output, the coordinates are proportional
-  if(prop_bbox){
-    pred_df$XMin <- pred_df$XMin*w
-    pred_df$XMax <- pred_df$XMax*w
-    pred_df$YMin <- (1-pred_df$YMin)*h
-    pred_df$YMax <- (1-pred_df$YMax)*h
-  } else {
-    # rescale the bounding box
-    if(w != 408 ){
-      w_scale <- w/408
-      pred_df$XMin <- pred_df$XMin*w_scale #(w*pred_df$XMin)/408
-      pred_df$XMax <- pred_df$XMax*w_scale#(w*pred_df$XMax)/408
+  # loop through images
+  for(i in 1:length(file_list)) {
+    
+    # get image filepath
+    img_path <- file.path(file_list[i])
+    
+    # extract image info
+    img_info <- pred_df[file.path(pred_df$filename) == img_path, ]
+    
+    # make new filename
+    plt_path <- file.path(paste(output_dir, stringr::str_split_i(img_path, "/", -1), sep="/"))
+    
+    # open image
+    img <- magick::image_read(img_path)
+    
+    # get image dimensions
+    img_w <- magick::image_info(img)$width
+    img_h <- magick::image_info(img)$height
+    
+    # make copy to draw boxes on
+    plt_img <- magick::image_draw(img)
+    
+    # loop through detections in an image
+    for(j in 1:nrow(img_info)){
+      
+      # scale bounding boxes to image dimensions
+      xmin <- img_info$xmin[j] * img_w
+      ymin <- img_info$ymin[j] * img_h
+      xmax <- img_info$xmax[j] * img_w
+      ymax <- img_info$ymax[j] * img_h
+      conf <- img_info$conf[j]
+      
+      # plot box
+      graphics::rect(xmin, ymin, xmax, ymax, border="red", lwd=2)
+      
+      # plot conf score
+      graphics::text(xmin, ymax+10, paste0("conf = ", conf), col = "red", cex=2)
+      
     }
-    if(h!= 307){
-      h_scale <- h/307
-      pred_df$YMin <- pred_df$YMin*h_scale #(pred_df$YMin/307)*h -307/h # #(h*pred_df$YMin)/307
-      pred_df$YMax <- pred_df$YMax*h_scale# (pred_df$YMax/307)*h - 307/h##(h*pred_df$YMax)/307
-    }  
+    grDevices::dev.off()
+    
+    # save image
+    magick::image_write(plt_img, path = plt_path, format = "jpg")
+    
+    # update progress bar
+    utils::setTxtProgressBar(pb,i) 
   }
-  
-  
-  
-  # make plot
-  grDevices::png(output_nm, width=w, height=h)
-  plot(img)
-  if (nrow(pred_df) > 0){ # Only plot boxes if there are predictions
-    for(i in 1:nrow(pred_df)){
-      graphics::segments(x0=pred_df$XMin[i], y0=pred_df$YMin[i],
-                         x1=pred_df$XMin[i], y1=pred_df$YMax[i], 
-                         col=col, lty=lty, lwd=lwd)
-      graphics::segments(x0=pred_df$XMin[i], y0=pred_df$YMin[i],
-                         x1=pred_df$XMax[i], y1=pred_df$YMin[i], 
-                         col=col, lty=lty, lwd=lwd)
-      graphics::segments(x0=pred_df$XMin[i], y0=pred_df$YMax[i],
-                         x1=pred_df$XMax[i], y1=pred_df$YMax[i], 
-                         col=col, lty=lty, lwd=lwd)
-      graphics::segments(x0=pred_df$XMax[i], y0=pred_df$YMax[i],
-                         x1=pred_df$XMax[i], y1=pred_df$YMin[i], 
-                         col=col, lty=lty, lwd=lwd)
-      if(plot_label){
-        graphics::text(x= pred_df$XMin[i]+6, y=pred_df$YMin[i]+10, pred_df$prediction[i],
-                       col=col, adj=0)  
-      }
-    }
-  }
-  
-  grDevices::dev.off()
-  
-}
+
+} ## END
