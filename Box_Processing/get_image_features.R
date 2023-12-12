@@ -44,22 +44,14 @@ get_image_features <- function(df, checkpoint_frequency) {
   if(length(xmin_col)==0 | length(xmax_col)==0 | length(ymin_col)==0 | length(ymax_col)==0){
     print("Cannot identify bounding box coordinates. Image features will be calculated 
           over the entire image.\n")
-    input_df <- data.frame(filename = df[ , file_col])
-  } else {
-    input_df <- data.frame(filename = df[ , file_col],
-                           xmin = df[, xmin_col],
-                           ymin = df[, ymin_col],
-                           xmax = df[, xmax_col],
-                           ymax = df[, ymax_col])
-  }
+  } 
   
   # remove duplicate rows or any rows where there is no file path
-  input_df <- dplyr::filter(input_df, !is.na(filename))
-  input_df <- dplyr::distinct(input_df)
+  input_df <- dplyr::filter(df, !is.na(filename))
+  input_df <- dplyr::distinct(df)
   
   # create df to store output
-  feature_df <- dplyr::mutate(input_df, 
-                              aspect.ratio = NA,
+  feature_df <- dplyr::mutate(input_df,
                               contrast = NA,
                               complexity = NA,
                               v.symmetry = NA,
@@ -80,7 +72,6 @@ get_image_features <- function(df, checkpoint_frequency) {
     
     # manage errors
     if("error" %in% list(img)) {
-      feature_df$aspect.ratio[i] <- NA
       feature_df$complexity[i] <- NA
       feature_df$contrast[i] <- NA
       feature_df$v.symmetry[i] <- NA
@@ -97,9 +88,6 @@ get_image_features <- function(df, checkpoint_frequency) {
         # get box dimensions 
         box_w <- (feature_df$xmax[i] - feature_df$xmin[i]) * img_w
         box_h <- (feature_df$ymax[i] - feature_df$ymin[i]) * img_h
-        
-        # calculate aspect ratio
-        feature_df$aspect.ratio[i] <- round(box_w / box_h, digits=3)
         
         # crop image to bbox
         bbox <- magick::image_crop(img, geometry = magick::geometry_area(width=box_w, height=box_h, 
@@ -132,7 +120,6 @@ get_image_features <- function(df, checkpoint_frequency) {
         img_f <- imagefluency::img_read(feature_df$filename[i])
         
         # extract features and add to df
-        feature_df$aspect.ratio[i] <- round(img_w / img_h, digits=3)
         feature_df$complexity[i] <- imagefluency::img_complexity(feature_df$filename[i])
         feature_df$contrast[i] <- imagefluency::img_contrast(img_f)
         feature_df$v.symmetry[i] <- imagefluency::img_symmetry(img_f)[['vertical']]
@@ -148,7 +135,7 @@ get_image_features <- function(df, checkpoint_frequency) {
     
     # save checkpoint
     if(i %% checkpoint_frequency == 0){
-      utils::write.csv(feature_df, paste0(getwd(), "/get_image_features_checkpoint.csv"))
+      data.table::fwrite(feature_df[1:i, ], paste0(getwd(), "/get_image_features_checkpoint.csv"))
     }
     
   }
