@@ -203,7 +203,7 @@ threshold_results <- function(target_df, pred_df, score_threshold, model_type){
   }
   
   # set heatmap proportion colors
-  spec_col <- circlize::colorRamp2(c(0, 0.1, 0.5, 0.8, 1), c("wheat2", "snow", "skyblue", "slateblue2", "darkorchid4"))
+  spec_col <- circlize::colorRamp2(c(0, 0.05, 0.1, 0.5, 0.8, 1), c("snow", "wheat1", "wheat2", "skyblue", "slateblue2", "darkorchid4"))
   
   # create sidebar annotations
   if(model_type == "species"){

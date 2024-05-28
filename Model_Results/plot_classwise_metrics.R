@@ -19,19 +19,16 @@
 #' 
 plot_classwise_metrics <- function(df, sourcei, modeli){
   
-  # placeholder list of plots
-  plot_list <- list(rep(NA, 3))
-  
   # filter dataframe by source 
   source_df <- dplyr::filter(df, source_id == sourcei)
   
   m_df <- dplyr::filter(source_df, model == modeli)
     
     # filter df to species present in the dataset
-  m_df <- dplyr::filter(sp_df, true_count > 0)
+  m_df <- dplyr::filter(m_df, true_count > 0)
     
   # build plot
-  m_plot <- ggplot2::ggplot(sp_df, aes(x = score_threshold, y = rate)) + 
+  m_plot <- ggplot2::ggplot(m_df, aes(x = score_threshold, y = rate)) + 
     geom_line(aes(col = class_name), lwd=0.8) +
     facet_wrap(vars(Metric)) + 
     theme_bw() + 
@@ -39,7 +36,7 @@ plot_classwise_metrics <- function(df, sourcei, modeli){
     scale_x_continuous(breaks = seq(0, 1, 0.2)) + 
     scale_y_continuous(breaks = seq(0, 1, 0.2)) + 
     labs(x = "Score Threshold", y = "Metric Rate", col = modeli,
-         title = paste0(stringr::str_to_title(modeli), " Model Evaluation Metrics \nLocation = ", as.character(source_id)))
+         title = paste0(stringr::str_to_title(modeli), " Model Evaluation Metrics \nLocation = ", as.character(sourcei)))
   
   return(m_plot)  
   

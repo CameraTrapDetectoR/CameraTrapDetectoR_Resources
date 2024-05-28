@@ -133,8 +133,11 @@ oos_eval_metrics <- function(df, models, confidence_threshold, source_id) {
   if("family" %in% models){
     
     # filter out unknown birds
-    fm_df <- df %>%
-      dplyr::filter(true_species != "bird_spp")
+    if("true_species" %in% colnames(df)){
+      fm_df <- df %>%
+        dplyr::filter(true_species != "bird_spp")
+    } else(fm_df <- df)
+
     
     # isolate family preds
     fm_df <- fm_df %>%
