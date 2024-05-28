@@ -1,98 +1,71 @@
-# Check MegaDetector output and add to training data
+# Process MegaDetector results and plot image copies with bboxes drawn
 
+# clear environment
 rm(list = ls())
 
-# import packages
-library(rjson)
-library(dplyr)
+# load functions
+source(paste0(getwd(), "/install_load.R"))
+source(paste0(getwd(), "/Box_Processing/format_md_preds.R"))
+source(paste0(getwd(), "/Box_Processing/plot_img_bbox.R"))
 
-# load plotting function
-code.path <- "C:/Users/amira.burns/OneDrive - USDA/Documents/CameraTrapDetectoR_Files/test_scripts/"
-source(paste0(code.path, "plot_img_bbox.R"))
+# load libraries
+install_load(c("dplyr", "rjson"))
 
-# set path
-json_path <- "G:/!ML_training_datasets/Las_Cruces_ARS/Las_Cruces_MD_results.json"
+# format md results
+boxes <- format_md_preds(json_path = "G:/!ML_training_datasets/ARS_RangelandResources_SystemsResearchUnit/Photos/ARS_RRSRU_MD_results.json",
+                              score_threshold = 0.40)
+boxes$filename <- stringr::str_replace_all(boxes$filename, "\\\\", "/")
 
-# load detections
-json_file <- rjson::fromJSON(file = json_path)
-md_results <- json_file$images
+# join class labels 
+# labels <- utils::read.csv("G:/!ML_training_datasets/ARS_RangelandResources_SystemsResearchUnit/amy_raccoons_opossums.csv")
+# labels$filename <- stringr::str_replace(labels$FilePath, "//FERALSWINEDB.usda.net/Photos", "G:")
+# boxes <- dplyr::left_join(boxes, labels, by = "filename")
 
-# convert results to r data frame
-md_df <- data.frame(matrix(nrow = 0, ncol = 7))
-colnames(md_df) <- c("filename", "class", "conf", "xmin", "ymin", "xmax", "ymax")
+boxes <- boxes %>%
+  dplyr::mutate(Species = stringr::str_split_i(filename, "/", -2))
 
-# loop through image files
-for(i in 1:length(md_results)){
-  # isolate detections for a single image
-  img <- md_results[i][[1]]
+# review boxes
+boxes %>% group_by(Species) %>% count(class)
+
+# separate files with only animal predictions
+non_animal_files <- boxes %>%
+  filter(class != "animal") %>%
+  select(filename) %>%
+  distinct()
+
+boxes_to_plot <- boxes %>%
+  filter(!(filename %in% non_animal_files$filename))
+
+# plot histogram of confidence scores
+hist(boxes_to_plot$conf)
+
+# filter out any but highest confidence scores
+boxes_to_plot_highscores <- boxes_to_plot %>%
+  filter(conf > 0.6)
+
+# loop through classes
+for(i in 5:length(classes)){
+  # create class folder
+  class_dir <- paste0("G:/!ML_training_datasets/!TrainingUpdatePhotos/ARS_RRSRU/", classes[i])
+  dir.create(class_dir)
   
-  # define variables
-  detections <- img$detections
-  filename <- img$file
+  # filter boxes
+  class_df <- dplyr::filter(boxes_to_plot_highscores,
+                            Species == classes[i])
   
-  # create dummy observation for empty detections
-  if(length(detections) == 0){
-    class <- "empty"
-    confidence <- 0
-    xmin <- ymin <- xmax <- ymax <- 0
-    det_row <- cbind(filename, class, conf, xmin, ymin, xmax, ymax)
-    md_df <- rbind(md_df, det_row)
-  }
+  # plot boxes
+  plot_img_bbox(class_df, class_dir)
   
-  else {
-    # loop through each prediction in a given image
-    for(j in 1:length(detections)){
-      
-      # isolate individual detection
-      pred <- detections[j][[1]]
-      
-      # define cat, conf, bbox
-      class <- pred$category
-      conf <- pred$conf
-      xmin <- pred$bbox[1]
-      ymin <- pred$bbox[2]
-      w <- pred$bbox[3]
-      h <- pred$bbox[4]
-      xmax <- xmin + w
-      ymax <- ymin + h
-      
-      # cat results into a vector
-      det_row <- cbind(filename, class, conf, xmin, ymin, xmax, ymax)
-      
-      # add detection to df
-      md_df <- rbind(md_df, det_row)
-    }
-  }
 }
 
-# do some data processing
-md_df <- md_df %>%
-  # convert numbers to numerics
-  mutate(conf = as.numeric(conf), xmin = as.numeric(xmin),
-         ymin = as.numeric(ymin), xmax = as.numeric(xmax), ymax = as.numeric(ymax)) %>%
-  # convert class code to label
-  mutate(class = ifelse(class == "1", "animal",
-                        ifelse(class == "2", "person",
-                               ifelse(class == "3", "vehicle", class)))) %>%
-  # create a flag column
-  mutate(flag = NA)
+# plot boxes
+#plot_img_bbox(boxes_to_plot_highscores, "G:/!ML_training_datasets/Amy_raccoons_opossums/boxes")
 
-# look at class counts 
-md_df %>% count(class)
 
-# flag any detections that are not animals
-md_df <- md_df %>%
-  mutate(flag = ifelse(class != "animal", "class_flag", flag))
+## After reviewing plots and finalizing boxes
+### Extract features from final boxes
+### Move images to !VarifiedPhotos dir
+### Update annotations file
 
-# flag detections below acceptable confidence threshold
-md_df$conf <- round(md_df$conf, 2)
 
-md_df <- md_df %>%
-  mutate(flag = ifelse(conf < 0.80, paste(flag, "conf_flag", sep = ", "), flag))
 
-# get unique image files 
-md_flag_files <- md_df %>%
-  select(c(filename, flag)) %>%
-  filter(!is.na(flag)) %>% distinct()
-
-# Think about what comes next in terms of verifying results

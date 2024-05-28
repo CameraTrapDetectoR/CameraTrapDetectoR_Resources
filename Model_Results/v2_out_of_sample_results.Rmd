@@ -1,0 +1,1391 @@
+---
+title: "V2 Out of Sample Results"
+author: "Amira Burns"
+date: sys.date()
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r setup}
+# load libs
+library(data.table)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+
+# oad functions
+source("./Model_Results/oos_eval_metrics.R")
+```
+
+## Format Predictions and Annotations
+
+```{r tax_dict}
+# Load taxonomic dictionary
+tax_dict <- data.table::fread("G:/!ML_training_datasets/!VarifiedBoundingBoxes/class_dictionary_20231227.csv")
+
+# extract usable columns
+tax_dict <- tax_dict %>%
+  dplyr::select(c(common.name.general, family, order, class)) %>%
+  dplyr::distinct() %>%
+  dplyr::rename(true_species = common.name.general, true_family = family, true_order=order, true_class = class)
+
+# remove duplicate species entries
+tax_dict <- tax_dict %>%
+  dplyr::filter(true_species != "grackle_spp") %>%
+  dplyr::filter(true_species != "quail_spp") %>%
+  dplyr::filter(!(true_species == "heron_spp" & true_family == "Aramidae")) %>%
+  dplyr::filter(!(true_species == "Mouse_Rat" & true_family == "Cricetidae")) %>%
+  dplyr::filter(!(true_species == "owl_spp" & true_family == "Tytonidae"))
+
+# rename common names to match model
+tax_dict <- tax_dict %>%
+  dplyr::mutate(true_species = if_else(true_species == "Opossum", "Virginia_Opossum",
+                               if_else(true_species == "chipmunk_spp", "Chipmunk",
+                               if_else(true_species == "grouse_spp", "Grouse",
+                               if_else(true_species == "cottontail_spp", "Cottontail_Rabbit",
+                               if_else(true_species == "iguana_spp", "Iguana",
+                               if_else(true_species == "owl_spp", "Owl",
+                               if_else(true_species == "heron_spp", "Heron",
+                               if_else(true_species == "hawk_spp", "Hawk",
+                               if_else(true_species == "egret_spp", "Egret",
+                               if_else(true_species == "rail_spp", "Rail",
+                               if_else(true_species == "vulture_spp", "Vulture", 
+                               if_else(stringr::str_detect(true_species, "Fox"), "Fox", true_species))))))))))))) %>%
+  dplyr::distinct()
+
+```
+
+### Rangeland Resources Systems Research Unit (RRSRU)
+
+Load the files:
+```{r rrsru_load}
+# define base path
+RRSRU_pth <- "G:/!ML_training_datasets/ARS_RangelandResources_SystemsResearchUnit/"
+
+# load predictions
+sp_preds <- data.table::fread(paste0(RRSRU_pth, "Sequences/species_v2_results_formatted.csv")) %>%
+  dplyr::rename(species_prediction = prediction, species_confidence = confidence,
+                species_count = count) %>%
+  select(-c(file_path, true_class, true_count, comments))
+fm_preds <- data.table::fread(paste0(RRSRU_pth, "Sequences/family_v2_results_formatted.csv")) %>%
+    dplyr::rename(family_prediction = prediction, family_confidence = confidence,
+                family_count = count) %>%
+  select(-c(file_path, true_class, true_count, comments, timestamp))
+gn_preds <- data.table::fread(paste0(RRSRU_pth, "Sequences/general_v2_results_formatted.csv")) %>%
+    dplyr::rename(general_prediction = prediction, general_confidence = confidence,
+                general_count = count) %>%
+  select(-c(file_path, true_class, true_count, comments, timestamp))
+
+# load annotations
+annots <- data.table::fread(paste0(RRSRU_pth, "WI_download/images.csv"))
+```
+
+Format and join predictions and labels into one data frame
+```{r rrsru_format}
+# combine predictions into single df
+pred_df <- sp_preds %>% 
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# extract camera id and reduce image_id to match annotations
+pred_df <- pred_df %>%
+  dplyr::mutate(camera_id = stringr::str_split_i(image_id, "/", 2),
+                img_id = stringr::str_split_i(image_id, "/", -1))
+
+# remove _500 images
+imgs <- pred_df$image_id[stringr::str_detect(pred_df$image_id, "_500.JPG")==TRUE]
+pred_df <- pred_df %>%
+  dplyr::filter(!(image_id %in% imgs))
+
+# capitalize empty, vehicle cats
+pred_df <- pred_df %>%
+  dplyr::mutate(across(c(species_prediction, family_prediction, general_prediction), 
+                       ~stringr::str_replace(., "empty", "Empty"))) %>%
+  dplyr::mutate(across(c(species_prediction, family_prediction, general_prediction), 
+                       ~stringr::str_replace(., "vehicle", "Vehicle")))
+
+# format general predictions
+pred_df <- pred_df %>%
+  dplyr::mutate(general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Bird", "Aves",
+                                     if_else(general_prediction == "Mammal", "Mammalia", general_prediction))) %>%
+  dplyr::filter(!general_prediction == "Image Error")
+
+# format family predictions
+pred_df <- pred_df %>%
+  dplyr::mutate(family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+# format species predictions
+pred_df <- pred_df %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, " ", "_")) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, "'", "")) %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "Canada_Lynx", "Lynx",
+                                     if_else(stringr::str_detect(species_prediction, "_Grouse"), "Grouse",
+                                     if_else(species_prediction == "White-nosed_Coati", "White-Nosed_Coati",
+                                             species_prediction))))
+
+# standardize annotation names
+annots <- annots %>%
+  dplyr::mutate(common_name = stringr::str_replace_all(common_name, " ", "_")) 
+annots <- annots %>%
+  dplyr::mutate(common_name = if_else(common_name == "Blank", "Empty",
+                              if_else(common_name == "Black-tailed_Jackrabbit", "Jackrabbit",
+                              if_else(common_name == "Domestic_Cattle", "Domestic_Cow",
+                              if_else(stringr::str_detect(common_name, "Prairie_Dog"), "Prairie_Dog",
+                              if_else(common_name == "Bird", "bird_spp",
+                              if_else(common_name == "Rabbit_and_Hare_Family", "Rabbit",
+                              if_else(common_name == "Lepus_Species", "Rabbit",
+                              if_else(common_name == "Eastern_Cottontail", "Cottontail_Rabbit",
+                              if_else(stringr::str_detect(common_name, "Human"), "Human",
+                              if_else(stringr::str_detect(common_name, "Vehicle"), "Vehicle",
+                                      common_name)))))))))))
+
+# format annotation columns to keep
+annots <- annots %>%
+  dplyr::select(c(location, common_name, number_of_objects)) %>%
+  dplyr::mutate(img_id = stringr::str_split_i(location, "/", -1)) %>%
+  dplyr::rename(true_species = common_name, 
+                true_count = number_of_objects) %>%
+  dplyr::select(-location)
+
+# add taxonomic family/class to annotations
+annots <- annots %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# join annotations to predictions
+rrsru_df <- dplyr::left_join(pred_df, annots,
+                             by = "img_id") %>%
+  dplyr::filter(!is.na(true_species))
+
+# filter out categories that can't be classified easily
+filtcats <- c("Lagomorpha_Order", "Mammal", "No_CV_Result", "Unknown", "Odocoileus_Species", "Passeriformes_Order")
+rrsru_df <- rrsru_df %>%
+  dplyr::filter(!(true_species %in% filtcats))
+
+# format true_count
+rrsru_df <- rrsru_df %>%
+  dplyr::mutate(true_count = if_else(true_species == "Empty", 0, true_count))
+
+# format general prediction
+rrsru_df <- rrsru_df %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                     if_else(general_prediction == "Bird", "Aves", general_prediction))) %>%
+  dplyr::mutate(general_prediction = stringr::str_to_title(general_prediction))
+
+# format taxonomic predictions for non-standard annotation categories
+rrsru_df <- rrsru_df %>%
+  dplyr::filter(true_species != "bird_spp")
+
+# reformat image id
+rrsru_df <- rrsru_df %>%
+  dplyr::mutate(image_id = paste(camera_id, img_id, sep="/"))
+
+# combine rabbits and foxes
+rrsru_df <- rrsru_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+```
+
+```{r rrsru_analysis}
+# classwise evaluation rates
+thresholds <- seq(0, 0.95, by=0.05)
+models <- c("species", "family", "general")
+source_id <- "RRSRU"
+
+eval_list <- list()
+
+for(i in seq_along(thresholds)){
+  eval_list[[i]] <- oos_eval_metrics(rrsru_df, models, thresholds[i], source_id)
+}
+
+rrsru_mets <- purrr::reduce(eval_list, dplyr::bind_rows)
+
+```
+
+### CPER_LTAR Check in
+
+*Note: only species predictions available for this set*  
+
+Load files:
+```{r cper_load}
+# load files
+cper_pth <- "G:/!ML_training_datasets/CPER_LTAR"
+cper_df <- readxl::read_xlsx(paste0(cper_pth, "/CamTrapDectectR_Model_VS_HumanTags_withConfidence.xlsx"))
+
+# remove empty spaces from colnames
+colnames(cper_df) <- stringr::str_replace_all(colnames(cper_df), " ", "")
+
+# rename prediction and true species
+cper_df <- cper_df %>%
+  dplyr::rename(true_species = `SpeciesCommonName(Human)`,
+                species_prediction = `SpeciesCommonName(A.I.)`,
+                species_confidence = Confidence) %>%
+  dplyr::mutate(image_id = paste(CameraName, stringr::str_split_i(AbsolutePath, "\\\\", -1), sep="_")) # extract image id
+
+# standardize names
+cper_df <- cper_df %>% 
+  mutate(true_species = stringr::str_replace_all(true_species, " ", "_")) %>%
+  mutate(true_species = if_else(true_species == "empty", "Empty", true_species)) %>%
+  mutate(true_species = if_else(true_species == "burrowing_owl", "Owl", 
+                        if_else(true_species == "swift_fox", "Swift_Fox", true_species))) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, " ", "_")) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, "'", "")) %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "White-nosed_Coati", "White-Nosed_Coati",
+                                     if_else(stringr::str_detect(species_prediction, "_Grouse"), "Grouse",
+                                     if_else(stringr::str_detect(species_prediction, "Fox"), "Fox",
+                                     if_else(species_prediction == "Canada_Lynx", "Lynx",
+                                             species_prediction)))))
+
+# join taxonomic dict
+cper_df <- cper_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# update higher class truths when available
+cper_df <- cper_df %>%
+  dplyr::mutate(true_family = if_else(true_species == "shrike_spp", "Laniidae", true_family))
+
+# filter out any images where higher classes don't match
+cper_df <- cper_df %>%
+  dplyr::filter(!is.na(true_family))
+
+# rename empty predictions
+cper_df <- cper_df %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "empty", "Empty", species_prediction))
+
+# remove classes not in the model
+nonmods <- c("Unknown_Lagomorph", "Unknown_Bird", "Western_Meadowlark",
+             "Prairie_Falcon", "Lark_Bunting", "unknown_mammal", "shrike_spp", "proctor_lotor")
+cper_df <- cper_df %>%
+  dplyr::filter(!(true_species %in% nonmods))
+
+cper_df <- cper_df %>%
+    dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+```
+
+Analysis
+```{r cper_mets}
+# get eval metrics across confidence thresholds
+thresholds <- seq(0, 0.95, by = 0.05)
+models <- "species"
+source_id <- "CPER_LTAR"
+
+# empty placeholder list
+cper_eval_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresholds)){
+  cper_eval_list[[i]] <- oos_eval_metrics(cper_df, models, thresholds[i], source_id)
+}
+
+cper_metrics <- purrr::reduce(cper_eval_list, dplyr::bind_rows)
+
+```
+
+```{r cper_viz}
+# remove NA obs
+cper_metrics <- cper_metrics %>%
+  dplyr::filter(!is.na(species_eval))
+
+
+# play with plots
+ggplot(cper_metrics) + 
+  geom_line(aes(x=score_threshold, y=eval_rate, col=true_species)) + 
+  facet_grid(~species_eval) + 
+  ggtitle("Single Source Single Model Eval Metrics by Species, Score Threshold")
+
+ggplot(cper_metrics) + 
+  geom_line(aes(x=score_threshold, y=eval_rate, col=species_eval)) + 
+  facet_wrap(~true_species) + 
+  ggtitle("Single Source Single Model Eval Metrics by Species, Score Threshold")
+
+# closer look at empty rate
+cper_metrics %>% filter(true_species == "Empty" & species_eval == "TP")
+
+```
+
+### Archbold Biological Station
+
+Load and format predictions
+```{r abs_load}
+# define base path
+Arch_pth <- "G:/!ML_training_datasets/Archbold_Training_Data/"
+
+# species predictions
+sp_preds <- data.table::fread(paste0(Arch_pth, "species_v2_results_formatted.csv")) %>%
+  dplyr::rename(species_prediction = prediction, 
+                species_count = count,
+                species_confidence = confidence) %>%
+  dplyr::select(where(~ !all(is.na(.)))) %>%
+  dplyr::select(-file_path) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2)) %>%
+  dplyr::filter(!grepl("!ML_training_datasets", image_id)) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, " ", "_")) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, "'", "")) %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "White-nosed_Coati", "White-Nosed_Coati",
+                                     if_else(stringr::str_detect(species_prediction, "_Grouse"), "Grouse",
+                                     if_else(species_prediction == "Canada_Lynx", "Lynx", species_prediction))))
+
+# family predictions
+fam_preds <- data.table::fread(paste0(Arch_pth, "family_v2_results_formatted.csv")) %>% 
+  dplyr::rename(family_prediction = prediction, 
+                family_count = count,
+                family_confidence = confidence) %>%
+  dplyr::select(where(~ !all(is.na(.)))) %>%
+  dplyr::select(-c(timestamp, file_path)) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2)) %>%
+  dplyr::mutate(family_prediction = stringr::str_to_title(family_prediction)) %>%
+  dplyr::mutate(family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+# general predictions
+gen_preds <- data.table::fread(paste0(Arch_pth, "general_v2_results_formatted.csv")) %>%
+  dplyr::rename(general_prediction = prediction, 
+                general_count = count,
+                general_confidence = confidence) %>%
+  dplyr::select(where(~ !all(is.na(.)))) %>%
+  dplyr::select(-c(timestamp, file_path)) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2)) %>%
+  dplyr::mutate(general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                             if_else(general_prediction == "Bird", "Aves", general_prediction)))
+```
+
+Format annotations
+```{r abs_format}
+# format annotations
+arch_annots <- sp_preds %>% 
+  dplyr::select(image_id) %>%
+  dplyr::dplyr::mutate(true_species = stringr::str_split_i(image_id, "/", 1)) %>%
+  dplyr::mutate(camera_id = if_else(true_species != "Bird", 
+                                    stringr::str_split_i(image_id, "/", 2), 
+                                    stringr::str_split_i(image_id, "/", 3))) %>%
+  dplyr::mutate(true_species = if_else(true_species == "Bird", 
+                                       stringr::str_split_i(image_id, "/", 2), true_species)) %>%
+  dplyr::mutate(true_species = stringr::str_to_title(true_species)) %>%
+  dplyr::mutate(true_species = stringr::str_replace_all(true_species, " ", "_")) %>%
+    dplyr::mutate(true_species = if_else(true_species == "Armadillo", "Nine-Banded_Armadillo",
+                               if_else(true_species == "Background", "Empty",
+                               if_else(true_species == "Great_Horned_Owl", "Owl",
+                               if_else(true_species == "Barred_Owl", "Owl",
+                               if_else(true_species == "Black_Bear", "American_Black_Bear",
+                               if_else(true_species == "Bluejay", "Blue_Jay",
+                               if_else(true_species == "Caracara", "Crested_Caracara",
+                               if_else(true_species == "Cattle_Or_Snowy_Egret", "Egret",
+                               if_else(true_species == "Cow", "Domestic_Cow",
+                               if_else(true_species == "Crow", "American_Crow",
+                               if_else(true_species == "Deer", "White-Tailed_Deer",
+                               if_else(true_species == "Dove", "dove_spp",
+                               if_else(true_species == "Duck", "Black-Bellied_Whistling_Duck",
+                               if_else(true_species == "Feral_Hog", "Wild_Pig",
+                               if_else(true_species == "Flying_Squirrel", "squirrel_spp",
+                               if_else(true_species == "Great_Crested_Flycatcher", "Great-Crested_Flycatcher",
+                               if_else(true_species == "Great_Blue_Heron", "Heron",
+                               if_else(true_species == "Great_Egret", "Egret",
+                               if_else(true_species == "Gray_Squirrel", "squirrel_spp",
+                               if_else(true_species == "Little_Blue_Heron", "Heron",
+                               if_else(true_species == "Long-Tailed_Weasel", "Long_Tailed_Weasel",
+                               if_else(true_species == "Meadowlark", "Eastern_Meadowlark",
+                               if_else(true_species == "Northern_Bobwhite", "Quail",
+                               if_else(true_species == "Northern_Mockingbird", "Mockingbird",
+                               if_else(true_species == "Opossum", "Virginia_Opossum",
+                               if_else(true_species == "Otter", "River_Otter",
+                               if_else(true_species == "Panther", "Mountain_Lion",
+                               if_else(true_species == "Pied_Billed_Grebe", "Pied-Billed_Grebe",
+                               if_else(true_species == "Palm_Warbler", "Warbler",
+                               if_else(true_species == "Raccoon", "Common_Raccoon",
+                               if_else(true_species == "Red-Shouldered_Hawk", "Hawk",
+                               if_else(true_species == "Robin", "American_Robin",
+                               if_else(true_species == "Towhee", "Eastern_Towhee",
+                               if_else(true_species == "White_Ibis", "American_White_Ibis",
+                               if_else(true_species == "Wild_Turkey", "Wild_Turkey",
+                                       true_species))))))))))))))))))))))))))))))))))))
+
+
+# remove species not in the model
+nonmods <- c("Gopher_Tortoise", "Lizard")
+arch_annots <- arch_annots %>%
+  dplyr::filter(!(true_species %in% nonmods))
+
+# join tax dict
+arch_annots <- arch_annots %>%
+  dplyr::left_join(tax_dict, by = "true_species") %>%
+  distinct()
+
+# join preds and annotations
+arch_df <- sp_preds %>%
+  dplyr::left_join(fam_preds, by = "image_id") %>%
+  dplyr::left_join(gen_preds, by = "image_id") %>%
+  dplyr::distinct(image_id, species_prediction, family_prediction, general_prediction, .keep_all=T) %>%
+  dplyr::left_join(arch_annots, by = "image_id") %>%
+  dplyr::filter(!is.na(true_species))
+
+# combine rabbits and foxes
+arch_df <- arch_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+  
+```
+
+Get metrics
+```{r arch_metrics}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "ArchRS"
+
+# create blank list holder
+arch_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  arch_mets_list[[i]] <- oos_eval_metrics(df = arch_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+arch_evals <- purrr::reduce(arch_mets_list, dplyr::bind_rows)
+```
+
+
+### ARS - Ft Keough
+
+
+```{r load, keough}
+# set dir
+keough_pth <- "G:/!ML_training_datasets/ARS_FtKeough/"
+
+# load predictions
+sp_preds <- data.table::fread(paste0(keough_pth, "species_v2_results_formatted.csv")) %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments)) %>%
+  dplyr::rename(species_prediction = prediction, species_count = count,
+                species_confidence = confidence) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, " ", "_")) %>%
+  dplyr::mutate(species_prediction = stringr::str_replace_all(species_prediction, "'", "")) 
+
+fm_preds <- data.table::fread(paste0(keough_pth, "family_v2_results_formatted.csv")) %>%
+  dplyr::select(-c(file_path, timestamp, true_class, true_count, comments))%>%
+  dplyr::rename(family_prediction = prediction, family_count = count,
+                family_confidence = confidence) %>%
+  dplyr::mutate(family_prediction = stringr::str_to_title(family_prediction)) %>%
+  dplyr::mutate(family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+gn_preds <- data.table::fread(paste0(keough_pth, "general_v2_results_formatted.csv")) %>%
+  dplyr::select(-c(file_path, timestamp, true_class, true_count, comments)) %>%
+  dplyr::rename(general_prediction = prediction, general_count = count,
+                general_confidence = confidence) %>%
+  dplyr::mutate(general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Bird", "Aves",
+                                     if_else(general_prediction == "Mammal", "Mammalia", general_prediction)))
+
+# combine predictions
+keough_df <- sp_preds %>%
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# rename empty preds
+keough_df <- keough_df %>%
+  dplyr::mutate(across(c(species_prediction, family_prediction, general_prediction), 
+                       ~if_else(.=="empty", "Empty", .)))
+# extract true class
+keough_df <- keough_df %>%
+  dplyr::mutate(true_species = stringr::str_split_i(image_id, "/", 2))
+
+# rename true species categories
+class_match <- data.frame(old_name = sort(unique(keough_df$true_species)),
+                          new_name = c("Nine-Banded_Armadillo", "Axis_Deer", "bird_spp", "Domestic_Cow", "Coyote",
+                                       "Gray_Fox", "Domestic_Goat", "Domestic_Dog", "Rabbit", "Common_Raccoon",
+                                       "Domestic_Sheep", "Wild_Turkey", "White-Tailed_Deer", "Wild_Pig"))
+keough_df <- keough_df %>%
+  dplyr::left_join(class_match, by = dplyr::join_by(true_species == old_name)) %>%
+  dplyr::select(-true_species) %>%
+  dplyr::rename(true_species = new_name)
+
+# join tax dict
+keough_df <- keough_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# simplify image name
+keough_df <- keough_df %>%
+  dplyr::mutate(image_id = stringr::str_split_i(image_id, "/", -1))
+
+# add source
+keough_df <- keough_df %>%
+  dplyr::mutate(source = "FtKeough")
+
+keough_df <- keough_df %>%
+    dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+```
+
+Run metrics
+```{r keough_eval}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "FtKeough"
+
+# create blank list holder
+keough_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  keough_mets_list[[i]] <- oos_eval_metrics(df = keough_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+keough_evals <- purrr::reduce(keough_mets_list, dplyr::bind_rows)
+
+```
+
+
+
+### CB/OBC Projects
+```{r cbobc}
+# set path
+cbobc_pth <- "G:/!ML_training_datasets/Patclark/Trail_camera_imagery/"
+
+# load data
+sp_preds <- read.csv(paste0(cbobc_pth, "CB.OBCProject_species_v2_model_predictions_annotated.csv"))
+fm_preds <- read.csv(paste0(cbobc_pth, "family_v2_model_predictions.csv"))
+gn_preds <- read.csv(paste0(cbobc_pth, "general_v2_results_formatted.csv"))
+
+# format predictions
+sp_preds <- sp_preds %>%
+  dplyr::filter(true_class != "") %>%
+  dplyr::mutate(image_id = stringr::str_replace(filename, "G:/!ML_training_datasets/PatClark/Trail_camera_imagery/", "")) %>%
+  dplyr::rename(species_prediction = prediction, species_count = count, 
+                species_confidence = confidence_score, true_species = true_class) %>%
+  dplyr::select(-c(filename, certainty, ImageName, ImageWidth, ImageHeight, MakeModel, Notes, review_comments))
+fm_preds <- fm_preds %>%
+  dplyr::mutate(image_id = stringr::str_replace(filename, "H:/!ML_training_datasets/PatClark/Trail_camera_imagery/", "")) %>%
+  dplyr::rename(family_prediction = prediction, family_confidence = confidence_score, 
+                family_count = count) %>%
+  dplyr::select(-c(filename, certainty))
+gn_preds <- gn_preds %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2)) %>%
+  dplyr::rename(general_prediction = prediction, general_confidence = confidence, 
+                general_count = count) %>%
+  dplyr::select(-c(file_path, timestamp, true_class, true_count, comments))
+
+# join preds
+cbobc_df <- sp_preds %>%
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# format preds
+cbobc_df <- cbobc_df %>%
+  dplyr::mutate(true_species = if_else(true_species == "Moutain_Lion", "Mountain_Lion", 
+                               if_else(true_species == "Gray_Wolf", "Wolf", true_species)),
+                general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                     if_else(general_prediction == "Bird", "Aves", general_prediction)),
+                family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+# join tax dict
+cbobc_df <- cbobc_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+cbobc_df <- cbobc_df %>%
+  dplyr::mutate(true_class = if_else(true_species == "Mammal", "Mammalia", true_class))
+
+# filter out unclear labels
+cbobc_df <- cbobc_df %>%
+  dplyr::filter(true_species != "Mammal")
+
+# add source
+cbobc_df <- cbobc_df %>%
+  dplyr::mutate(source = "CB/OBC")
+
+cbobc_df <- cbobc_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+
+```
+
+Run metrics
+```{r cbobc_eval}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "CBOBC"
+
+# create blank list holder
+cbobc_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  cbobc_mets_list[[i]] <- oos_eval_metrics(df = cbobc_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+cbobc_evals <- purrr::reduce(cbobc_mets_list, dplyr::bind_rows)
+
+```
+
+
+### Oregon
+```{r oregon}
+# define path
+or_pth <- "G:/!ML_training_datasets/PatClark/oregon/"
+
+# load predictions
+sp_preds <- read.csv(paste0(or_pth, "oregon_species_predictions_formatted_partially_reviewed_clark_11092023.csv"))
+fm_preds <- read.csv(paste0(or_pth, "oregon_family_v2_results_formatted.csv"))
+gn_preds <- read.csv(paste0(or_pth, "oregon_general_v2_results_formatted.csv"))
+
+# format preds 
+sp_preds <- sp_preds %>%
+  dplyr::mutate(image_id = stringr::str_sub(filename, start=2)) %>%
+  dplyr::rename(species_prediction = class_name, species_count = count, 
+                species_confidence = confidence) %>%
+  select(-c(comments, filename))
+sp_preds <- sp_preds %>%
+  dplyr::filter(true_species != "") %>%
+  dplyr::mutate(true_species = if_else(true_species == "Domesitic_Cow", "Domestic_Cow", 
+                               if_else(true_species == " Vehicle", "Vehicle", 
+                               if_else(true_species == "Domestic_Horse", "Horse", true_species))),
+                true_count = as.integer(true_count)) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~if_else(. == "empty", "Empty", .)))
+sp_preds <- sp_preds %>% dplyr::filter(species_prediction != "")
+
+gn_preds <- gn_preds %>%
+  dplyr::mutate(image_id = stringr::str_replace(image_id, "G:/!ML_training_datasets/PatClark/", ""),
+                general_prediction = stringr::str_to_title(prediction)) %>%
+  dplyr::rename(general_confidence = confidence, general_count = count) %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments, prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                     if_else(general_prediction == "Bird", "Aves", general_prediction))) %>%
+  dplyr::filter(general_prediction != "Image Error")
+
+fm_preds <- fm_preds %>%
+  dplyr::mutate(image_id = stringr::str_replace(file_path,"/90daydata/cameratrapdetector/Pat_Clark/", ""),
+                family_prediction = stringr::str_to_title(prediction)) %>%
+  dplyr::rename(family_confidence = confidence, family_count = count) %>%
+  dplyr::select(-c(X, file_path, prediction, location)) %>%
+  dplyr::filter(family_prediction != "Image Error")
+
+# join preds
+or_df <- sp_preds %>%
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# join tax dict
+or_df <- or_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# remove any NA truths
+or_df <- or_df %>% dplyr::filter(true_species != "Image_Error")
+
+or_df <- or_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+```
+
+Run metrics
+```{r or_eval}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "OR"
+
+# create blank list holder
+or_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  or_mets_list[[i]] <- oos_eval_metrics(df = or_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+or_evals <- purrr::reduce(or_mets_list, dplyr::bind_rows)
+
+```
+
+### Las Cruces
+
+```{r lascruc_load}
+# set path
+lc_pth <- "G:/!ML_training_datasets/Las_Cruces_ARS/"
+
+# load preds
+sp_preds <- read.csv(paste0(lc_pth, "species_v2_results_formatted.csv"))
+fm_preds <- read.csv(paste0(lc_pth, "family_v2_results_formatted.csv"))
+gn_preds <- read.csv(paste0(lc_pth, "general_v2_results_formatted.csv"))
+
+# load labels
+lc_labs <- read.csv(paste0(lc_pth, "Las_Cruces_labels_formatted_20240108.csv"))
+
+# format and join preds
+sp_preds <- sp_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments)) %>%
+  dplyr::rename(species_prediction = prediction, species_confidence = confidence, species_count = count)
+fm_preds <- fm_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments, timestamp)) %>%
+  dplyr::rename(family_prediction = prediction, family_confidence = confidence, family_count = count)
+gn_preds <- gn_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments, timestamp)) %>%
+  dplyr::rename(general_prediction = prediction, general_confidence = confidence, general_count = count)
+
+lc_preds <- sp_preds %>%
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# extract image id to match labels
+lc_preds <- lc_preds %>%
+    dplyr::mutate(Pasture = stringr::str_split_i(image_id, "/", -3)) %>%
+    dplyr::mutate(Pasture = stringr::str_replace(Pasture, " ", "_")) %>%
+    dplyr::mutate(cam_id = stringr::str_split_i(image_id, "/", -2)) %>%
+    dplyr::mutate(cam_id = stringr::str_split_i(cam_id, "\\(", -1)) %>%
+    dplyr::mutate(cam_id = as.numeric(stringr::str_replace(cam_id, "\\)", ""))) %>%
+    dplyr::mutate(photo_id = stringr::str_split_i(image_id, "/", -1)) %>%
+    dplyr::mutate(photo_id = stringr::str_replace(photo_id, "__", "_"))
+lc_preds <- lc_preds %>%
+  dplyr::mutate(collection_date = stringr::str_split_i(image_id, "/", 2)) %>%
+  dplyr::mutate(time_period = if_else(collection_date == "2019 Fall McIntosh", "Fall2019",
+                              if_else(collection_date == "2020 Fall McIntosh", "2020",
+                              if_else(collection_date == "2021 Fall Funk", "Fall2021",
+                              if_else(collection_date == "2021 Spring Funk", "Spring21",
+                              if_else(collection_date == "2022 Fall Funk", "Fall2022",
+                              if_else(collection_date == "2022 Spring Funk", "Spring2022", "time_period_unknown")))))))
+lc_preds <- lc_preds %>%
+  dplyr::mutate(image_id = paste("LasCruces", time_period, Pasture, "Camera", cam_id, photo_id, sep = "_"))
+
+# remove erroneous columns
+lc_labs <- lc_labs %>% 
+  dplyr::select(-c(X, old_path, Pasture, cam_id, photo_id, new_path, Discrepancy.Notes, timestamp, time_period))
+lc_preds <- lc_preds %>%
+  dplyr::select(-collection_date)
+
+# join labels and preds
+lc_df <- lc_preds %>%
+  dplyr::left_join(lc_labs, by ="image_id")
+
+# filter unknown labels, rename labels to match tax dict
+lc_df <- lc_df %>% 
+  dplyr::filter(!is.na(true_species)) %>%
+  dplyr::filter(true_species != "Unknown") %>%
+  dplyr::mutate(true_species = stringr::str_trim(true_species)) %>%
+  dplyr::mutate(true_species = if_else(true_species == "Mouse", "Mouse_Rat",
+                               if_else(stringr::str_detect(true_species, "awk"), "Hawk",
+                               if_else(true_species == "Human 1", "Human", 
+                               if_else(true_species == "Bird", "bird_spp", true_species)))))
+
+# format pred labels
+lc_df <- lc_df %>% 
+  dplyr::mutate(species_prediction = stringr::str_replace(species_prediction, "'", ""),
+                species_prediction = stringr::str_replace_all(species_prediction, " ", "_")) %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "Canada_Lynx", "Lynx",
+                                     if_else(species_prediction == "White-nosed_Coati", "White-Nosed_Coati",
+                                     if_else(stringr::str_detect(species_prediction, "Grouse"), "Grouse",
+                                     if_else(species_prediction == "empty", "Empty", species_prediction))))) %>%
+  dplyr::mutate(across(c(family_prediction, general_prediction), ~stringr::str_to_title(.))) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                     if_else(general_prediction == "Bird", "Aves", general_prediction)),
+                family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+# join tax dict
+lc_df <- lc_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# filter out lizards and foxes (can't tell if they're grey or red, too close to camera and dark)
+lc_df <- lc_df %>%
+  dplyr::filter(true_species != "Lizard")
+
+lc_df <- lc_df %>%
+  dplyr::filter(!is.na(true_family))
+
+lc_df <- lc_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+```
+
+
+Run metrics
+```{r lc_mets}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "LasCruces_ARS"
+
+# create blank list holder
+lc_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  lc_mets_list[[i]] <- oos_eval_metrics(df = lc_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+lc_evals <- purrr::reduce(lc_mets_list, dplyr::bind_rows)
+
+```
+
+
+### Yancy
+```{r yancy_load}
+# set path
+labels_pth <- "C:/Users/amira.burns/OneDrive - USDA/Documents/Collaborative/Yancy/data/"
+preds_pth <- "G:/!ML_training_datasets/Yancy/Control/"
+
+# load preds
+sp_preds <- read.csv(paste0(preds_pth, "species_v2_results_formatted.csv"))
+fm_preds <- read.csv(paste0(preds_pth, "family_v2_results_formatted.csv"))
+gn_preds <- read.csv(paste0(preds_pth, "general_v2_results_formatted.csv"))
+
+# load annotations
+y_labs <- read.csv(paste0(labels_pth, "/full_df_yancy.csv"))
+
+```
+
+```{r yancy_format}
+# format species preds
+sp_preds <- sp_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments)) %>%
+  dplyr::rename(species_prediction = prediction, species_confidence = confidence, species_count = count) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2),
+                species_prediction = stringr::str_replace_all(species_prediction, " ", "_"),
+                species_prediction = stringr::str_replace_all(species_prediction, "'", "")) %>%
+  dplyr::mutate(species_prediction = if_else(species_prediction == "White-nosed_Coati", "White-Nosed_Coati",
+                                     if_else(species_prediction == "Canada_Lynx", "Lynx",
+                                     if_else(stringr::str_detect(species_prediction, "Grouse"), "Grouse",
+                                     if_else(species_prediction == "empty", "Empty", species_prediction)))))
+
+# format family preds
+fm_preds <- fm_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments, timestamp)) %>%
+  dplyr::rename(family_prediction = prediction, family_confidence = confidence, family_count = count) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2),
+                family_prediction = stringr::str_to_title(family_prediction)) %>%
+  dplyr::mutate(family_prediction = if_else(family_prediction == "Hominidae", "Human", family_prediction))
+
+# format general preds
+gn_preds <- gn_preds %>%
+  dplyr::select(-c(file_path, true_class, true_count, comments, timestamp)) %>%
+  dplyr::rename(general_prediction = prediction, general_confidence = confidence, general_count = count) %>%
+  dplyr::mutate(image_id = stringr::str_sub(image_id, start=2),
+                general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                     if_else(general_prediction == "Bird", "Aves", general_prediction)))
+
+# join preds
+yancy_preds <- sp_preds %>%
+  dplyr::left_join(fm_preds, by = "image_id") %>%
+  dplyr::left_join(gn_preds, by = "image_id")
+
+# format labels
+y_labs <- y_labs %>%
+  dplyr::filter(censor == 0) %>%
+  dplyr::select(c(image_name, true_class, true_count)) %>%
+  dplyr::rename(true_species = true_class)
+
+# standardize label names
+y_labs <- y_labs %>%
+  dplyr::filter(true_species != "") %>%
+  dplyr::mutate(true_species = stringr::str_trim(true_species)) %>%
+  dplyr::mutate(true_species = if_else(true_species == "empty" | true_species == "empy", "Empty",
+                               if_else(stringr::str_detect(true_species, "Heron"), "Heron",
+                               if_else(true_species == "Common_Racoon", "Common_Raccoon",
+                               if_else(true_species == "Mule_Deer" | true_species == "White_Tailed_Deer", "White-Tailed_Deer",
+                               if_else(true_species == "Armadillo", "Nine-Banded_Armadillo",
+                               if_else(stringr::str_detect(true_species, "Vulture"), "Vulture",
+                               if_else(true_species == "human", "Human", true_species))))))))
+
+# join tax dict to labels
+y_labs <- y_labs %>%
+  dplyr::left_join(tax_dict, by = "true_species") %>%
+  dplyr::rename(image_id = image_name)
+
+# join preds and labels
+yancy_df <- dplyr::left_join(yancy_preds, y_labs, by = "image_id")
+
+# remove preds without labels
+yancy_df <- yancy_df %>%
+  dplyr::filter(!is.na(true_species))
+
+yancy_df <- yancy_df %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(. == "Cottontail_Rabbit" | 
+                                                                      . == "Jackrabbit" | 
+                                                                      . == "Snowshoe_Hare", "Rabbit", .))) %>%
+  dplyr::mutate(across(c(true_species, species_prediction), ~ if_else(stringr::str_detect(., "Fox"), "Fox", .)))
+
+```
+
+
+Run metrics
+```{r yancy_eval}
+# set function parameters
+thresh_seq <- seq(0, 0.95, by = 0.05)
+models <- c("species", "family", "general")
+source_id <- "Yancy"
+
+# create blank list holder
+yan_mets_list <- list()
+
+# loop over score thresholds
+for(i in seq_along(thresh_seq)){
+  # run function
+  yan_mets_list[[i]] <- oos_eval_metrics(df = yancy_df, models = models, 
+                                          confidence_threshold = thresh_seq[i], source_id = source_id)
+}
+
+# combine list into single df
+yancy_evals <- purrr::reduce(yan_mets_list, dplyr::bind_rows)
+
+```
+
+
+
+## Combine 
+
+```{r combine}
+
+# combine separate source evals into one dataframe
+full_evals <- dplyr::bind_rows(rrsru_mets, cper_metrics, arch_evals,
+                               keough_evals, cbobc_evals, or_evals,
+                               lc_evals, yancy_evals)
+
+full_evals <- full_evals %>% 
+  dplyr::filter(class_name != "image_error")
+
+# brief overview of data
+# get counts of target classes by model, source
+target_counts <- full_evals %>% 
+  dplyr::filter(true_count > 0) %>%
+  dplyr::select(c(model, source_id, class_name, true_count)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(model, source_id, class_name) %>%
+  dplyr::summarize(total_count = sum(true_count)) %>%
+  tidyr::pivot_wider(names_from = source_id, values_from = total_count)
+
+target_counts <- dplyr::mutate_all(target_counts, ~replace(., is.na(.), 0))
+
+# create long df for plotting
+eval_long <- full_evals %>%
+  dplyr::rename(TP_count = TP, FP_count = FP, FN_count = FN) %>%
+  tidyr::pivot_longer(cols = c(TP_count, FP_count, FN_count, TP_rate, FN_rate, FP_rate), 
+                      names_to =  c("Metric", ".value"),
+                      names_sep = "_")
+```
+
+### Single Source Review
+
+Heatmaps
+```{r heatmap}
+
+  
+# make an out of sample heatmap
+heatmap <- oos_heatmap(rrsru_df, "family", confidence_threshold = 0.1, source_id = "RRSRU")
+
+# save heatmap
+pdf(file=paste0(yancy_pth, "Yancy_species_v2_heatmap_conf10.pdf"),
+    width=16, height=14)
+print(heatmap)
+dev.off()
+
+
+# single-sample heatmap loop
+confs <- seq(0.05, 0.95, by = 0.10)
+
+heatmap_list <- list()
+
+for(i in 1:length(confs)){
+  heatmap_list[[i]] <- oos_heatmap(cper_df, "species", confidence_threshold = confs[i], source_id = "CPER_LTAR")
+}
+
+
+pdf(file=paste0(cper_pth, "/CPERLTAR_Species_Confusion_Matrices_by_Conf_Threshold.pdf"),
+    width=10, height=10)
+for(i in 1:length(heatmap_list)){
+  print(heatmap_list[[i]])
+}
+dev.off()
+
+
+```
+Single Source Classwise Plots
+```{r singsplts}
+cper_subset <- eval_long %>%
+  dplyr::filter(source_id == "CPER_LTAR") %>%
+  dplyr::filter(true_count > 0)
+
+ggplot(cper_subset, aes(x = score_threshold, y=rate)) + 
+  geom_line(aes(group = interaction(Metric, class_name), col = Metric), lwd=0.9) + 
+  facet_grid(Metric~class_name) + 
+  theme_bw() + ggtitle("CPER-LTAR Species Model Evaluation by Score Threshold")
+
+```
+
+Classwise metric plots
+```{r classplots}
+
+# set source and plot vectors
+sources <- unique(eval_long$source_id)
+models <- c("species", "family", "general")
+
+# create placeholder plot list
+sp_plts <- fm_plts <- gn_plts <- list()
+
+# loop through models
+for(i in 1:length(sources)){
+  
+  # species model
+  sp_plts[[i]] <- tryCatch(plot_classwise_metrics(eval_long, sourcei = sources[i], modeli = "species"),
+                           error = function(e) NA)
+  
+  # family model
+  fm_plts[[i]] <- tryCatch(plot_classwise_metrics(eval_long, sourcei = sources[i], modeli = "family"),
+                           error = function(e) NA)
+  
+  # general model
+  gn_plts[[i]] <- tryCatch(plot_classwise_metrics(eval_long, sourcei = sources[i], modeli = "general"), 
+                           error = function(e) NA)
+  
+  
+}
+
+plot_list <- c(sp_plts, fm_plts, gn_plts)
+
+pdf(file=paste0(viz_pth, "/Species_Sourcewise_Classwise_Plots.pdf"),
+    width=10, height=10)
+for(i in 1:length(sp_plts)){
+  print(sp_plts[[i]])
+}
+dev.off()
+
+```
+
+
+### Test Plots
+
+```{r plot_doc_prep}
+
+# set path to save sample plots
+viz_pth <- "C:/Users/amira.burns/OneDrive - USDA/Documents/CameraTrapDetectoR_Files/Code_Resources/Viz"
+
+# isolate empty evals
+empties <- eval_long %>% 
+  dplyr::filter(class_name == "Empty") %>%
+  dplyr::filter(true_count > 0)
+
+pls <- list()
+```
+
+```{r empties}
+# test plots
+pls[[1]] <- ggplot(empties, aes(x = score_threshold, y=rate)) + 
+  geom_line(aes(group = interaction(Metric, source_id), col = Metric), lwd=0.9) + 
+  facet_wrap(vars(model)) + 
+  theme_bw() + ggtitle("Empty Image Evaluation by Source, Score Threshold, Model")
+  
+pls[[2]] <- ggplot(empties, aes(x = score_threshold, y=rate)) + 
+  geom_line(aes(group = interaction(Metric, source_id), col = Metric), lwd=0.9) + 
+  facet_grid(model~Metric) + 
+  theme_bw() + ggtitle("Empty Image Evaluation by Source, Score Threshold, Model")
+
+# filter to a single score threshold for more testing
+empty50 <- empties %>% 
+  dplyr::filter(score_threshold == 0.5)
+
+pls[[3]] <- ggplot(empty50, aes(x = model, y = rate)) + 
+  geom_jitter(aes(col = source_id), width = 0.05, alpha = 0.6, size = 3) +
+  facet_wrap(vars(Metric)) + 
+  theme_light() + 
+  ggtitle("Metric Rates by Model, 0.5 Score Threshold")
+
+pls[[4]] <- ggplot(empty50, aes(x = model, y = rate, size = count)) + 
+   geom_jitter(aes(col = source_id), width = 0.05, alpha = 0.6) +
+  facet_wrap(vars(Metric)) + 
+  theme_light() + 
+  labs(size = "sample size") + 
+  ggtitle("Metric Rates by Model, 0.5 Score Threshold, scaled by sample size")
+
+```
+
+```{r TP_plots}
+# true positives line plot
+TP_eval <- eval_long %>%
+  dplyr::filter(Metric == "TP") %>%
+  dplyr::filter(true_count > 0) %>%
+  dplyr::filter(score_threshold == 0.25) # filter to single score threshold; functionalize this
+
+# filter out species with <=2 occurrences
+classes <- TP_eval %>% 
+  dplyr::count(class_name) %>% 
+  dplyr::filter(n>3)
+TP_eval <- TP_eval %>%
+  dplyr::filter(class_name %in% classes$class_name) 
+# reorder factor levels for classes, models
+TP_eval <- TP_eval %>%
+  dplyr::mutate(model = factor(model, levels = c("species", "family", "general")))
+
+# build plot
+pls[[5]] <- ggplot(TP_eval, aes(x = rate, y = class_name, size = count)) + 
+  geom_jitter(aes(color=source_id), height = 0.05, alpha = 0.8) +
+  #geom_line() + 
+  facet_wrap(vars(model), scales = "free_y") + 
+  ggtitle("Accuracy Rate by Class, Model, Source, Sample Size") + 
+  theme_bw() + 
+  paletteer::scale_color_paletteer_d("nationalparkcolors::SmokyMountains") + 
+  theme(legend.position = "none")
+
+ # try violin plot
+pls[[6]] <- ggplot(TP_eval, aes(x = rate, y = class_name, size = count)) + 
+  geom_violin(scale = "count", alpha = 0) + 
+  facet_wrap(vars(model), scales = "free") + 
+  ggtitle("Accuracy Rate by Class, Model, Source, Sample Size")
+```
+
+Rework plot to colored lines; prob need to do one model at a time
+
+```{r sp_plots}
+# filter and format data
+spTP_eval <- TP_eval %>%
+  dplyr::filter(model == "species")
+sp_order <- spTP_eval %>%
+  dplyr::select(class_name) %>%
+  dplyr::distinct() %>%
+  dplyr::rename(true_species = class_name) %>%
+  dplyr::left_join(tax_dict, by = "true_species") %>%
+  dplyr::arrange(true_class, true_order, true_family)
+alt_cl <- sp_order %>%
+  dplyr::filter(true_class %in% c("Human", "Vehicle", "Empty")) %>%
+  dplyr::arrange(desc(true_class))
+sp_order <- sp_order %>%
+  dplyr::filter(!(true_class %in% alt_cats)) %>%
+  dplyr::bind_rows(alt_cl)
+spTP_eval <- spTP_eval %>%
+  dplyr::mutate(class_name = factor(class_name, levels = rev(sp_order$true_species)))
+spTP_means <- spTP_eval %>%
+  dplyr::select(c(class_name, true_count, count)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(class_name) %>%
+  dplyr::summarize(meanrate = sum(count) / sum(true_count))
+spTP_eval <- spTP_eval %>%
+  dplyr::left_join(spTP_means, by = c("class_name"))
+  
+
+# uncount df for violin plot
+spTP_vln <- spTP_eval %>%
+  dplyr::select(c(class_name, true_count, source_id, rate)) %>%
+  tidyr::uncount(true_count)
+
+# line plot
+pls[[7]] <- ggplot(spTP_eval, aes(x = rate, y = class_name)) + 
+  geom_line(aes(col = class_name), lwd = 1.5) + 
+  #scale_shape_manual(values = 1:length(unique(spTP_eval$source_id))) +
+  #geom_jitter(aes(shape = source_id), height = 0.1, size = 2) +
+  geom_point(aes(x = meanrate, col = class_name), size = 4) + 
+  ggsci::scale_color_igv() + 
+  labs(x="", y="", title = "Species Model") + 
+  theme_classic() + 
+  theme(legend.position = "none")
+
+# violin plot
+pls[[8]] <- ggplot(spTP_vln, aes(x = rate, y = class_name)) + 
+  geom_violin(scale = "count")
+  geom_violin(scale = "count", alpha = 0, aes(col = class_name), lwd = 1) + 
+  scale_shape_manual(values = 1:length(unique(spTP_eval$source_id))) +
+  geom_jitter(data=spTP_eval, aes(x = rate, y = class_name, shape = as.factor(source_id)), height = 0.1, size = 2) + 
+  ggsci::scale_color_igv() + 
+  theme_bw() + 
+  ggtitle("Species Accuracy Range by Source, scaled by sample size") +
+  theme(legend.position = "none")
+```
+
+```{r fm_plots}
+# filter and format data
+fmTP_eval <- TP_eval %>%
+  dplyr::filter(model == "family")
+fm_order <- fmTP_eval %>%
+  dplyr::select(class_name) %>%
+  dplyr::distinct() %>%
+  dplyr::rename(true_family = class_name) 
+fm_dict <- tax_dict %>% 
+  dplyr::select(-true_species) %>%
+  dplyr::distinct()
+fm_order <- fm_order %>%
+  dplyr::left_join(fm_dict, by = "true_family") %>%
+  dplyr::arrange(true_class, true_order, true_family)
+alt_cl <- fm_order %>%
+  dplyr::filter(true_class %in% c("Human", "Vehicle", "Empty")) %>%
+  dplyr::arrange(desc(true_class))
+fm_order <- fm_order %>%
+  dplyr::filter(!(true_class %in% alt_cats)) %>%
+  dplyr::bind_rows(alt_cl)
+fmTP_eval <- fmTP_eval %>%
+  dplyr::mutate(class_name = factor(class_name, levels = rev(fm_order$true_family)))
+fmTP_means <- fmTP_eval %>%
+  dplyr::select(c(class_name, true_count, count)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(class_name) %>%
+  dplyr::summarize(meanrate = sum(count) / sum(true_count))
+fmTP_eval <- fmTP_eval %>%
+  dplyr::left_join(fmTP_means, by = c("class_name"))
+
+# line plot
+pls[[9]] <- ggplot(fmTP_eval, aes(x = rate, y = class_name)) + 
+  geom_line(aes(col = class_name), lwd = 1.5) + 
+  #scale_shape_manual(values = 1:length(unique(fmTP_eval$source_id))) +
+  #geom_jitter(aes(shape = source_id), height = 0.1, size = 2) +   
+  ggsci::scale_color_igv() + 
+  geom_point(aes(x = meanrate, col = class_name), size = 4) + 
+  labs(x="", y="", title="Family Model") + 
+  theme_classic() + 
+  theme(legend.position = "none")
+
+# violin plot
+pls[[10]] <- ggplot(fmTP_eval, aes(x = rate, y = class_name, size = count)) + 
+  geom_violin(scale = "count", alpha = 0, aes(col = class_name), lwd = 1) + 
+  scale_shape_manual(values = 1:length(unique(fmTP_eval$source_id))) +
+  geom_jitter(aes(shape = as.factor(source_id)), height = 0.1, size = 2) +  
+  ggsci::scale_color_igv() + 
+  theme_bw() + 
+  ggtitle("Family Accuracy Range by Source, sample size") +
+  theme(legend.position = "none")
+```
+
+```{r gn_plots}
+# filter and format data
+gnTP_eval <- TP_eval %>%
+  dplyr::filter(model == "general") %>%
+  dplyr::mutate(class_name = factor(class_name, levels = rev(c("Aves", "Mammalia", "Vehicle", "Human", "Empty"))))
+gnTP_means <- gnTP_eval %>%
+  dplyr::select(c(class_name, true_count, count)) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(class_name) %>%
+  dplyr::summarize(meanrate = sum(count) / sum(true_count))
+gnTP_eval <- gnTP_eval %>%
+  dplyr::left_join(gnTP_means, by = c("class_name"))
+
+# line plot
+pls[[11]] <- ggplot(gnTP_eval, aes(x = rate, y = class_name)) + 
+  geom_line(aes(col = class_name), lwd = 1.5) + 
+  #scale_shape_manual(values = 1:length(unique(gnTP_eval$source_id))) +
+  #geom_jitter(aes(shape = source_id), height = 0.1, size = 2) +
+  geom_point(aes(x = meanrate, col = class_name), size = 4) + 
+  ggsci::scale_color_igv() + 
+  theme_classic() + 
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x="", y="", title="General Model") +
+  theme(legend.position = "none")
+
+# violin plot
+pls[[12]] <- ggplot(gnTP_eval, aes(x = rate, y = class_name, size = count)) + 
+  geom_violin(scale = "count", alpha = 0, aes(col = class_name), lwd = 0.8) + 
+  scale_shape_manual(values = 1:length(unique(gnTP_eval$source_id))) +
+  geom_jitter(aes(shape = as.factor(source_id)), height = 0.1, size = 2) + 
+  ggsci::scale_color_igv() + 
+  theme_bw() + 
+  ggtitle("General Accuracy Range by Source, sample size") +
+  theme(legend.position = "none")
+```
+
+```{r save_plots}
+pdf(file=paste0(viz_pth, "/Out-of-Sample_Sample_Plots.pdf"),
+    width=10, height=10)
+for(i in 1:length(pls)){
+  print(pls[[i]])
+}
+dev.off()
+```
+
+
+In sample metrics
+```{r insamp}
+# set path 
+v2_pth <- "C:/Users/amira.burns/OneDrive - USDA/Projects/CameraTrapDetectoR/output/"
+
+# load species info
+sp_pr <- data.table::fread(paste0(v2_pth, "species_v2/50epochs/pred_df_50epochs.csv"))
+sp_tar <- data.table::fread(paste0(v2_pth, "species_v2/target_df.csv"))
+
+# format and join
+sp_pr <- sp_pr %>%
+  dplyr::rename(species_prediction = class_name, image_id = file_id)
+sp_tar <- sp_tar %>%
+  dplyr::rename(true_species = class_name, image_id = file_id)
+sp_df <- dplyr::left_join(sp_pr, sp_tar, by = "image_id") %>%
+  dplyr::select(image_id, species_prediction, confidence, true_species) %>%
+  dplyr::rename(species_confidence = confidence)
+sp_df <- sp_df %>%
+  dplyr::left_join(tax_dict, by = "true_species")
+
+# get species metrics
+sp_test_mets_full <- oos_eval_metrics(sp_df, models = "species", confidence_threshold = 0, source_id = "test")
+sp_test_mets_70 <- oos_eval_metrics(sp_df, models = "species", confidence_threshold = 0.7, source_id = "test")
+
+# load family info
+fm_pr <- data.table::fread(paste0(v2_pth, "family_v2/pred_df_50epochs.csv"))
+fm_tar <- read.csv(paste0(v2_pth, "family_v2/target_df.csv"))
+
+# format and join
+fm_pr <- fm_pr %>%
+  dplyr::rename(family_prediction = class_name, image_id = filename)
+fm_tar <- fm_tar %>%
+  dplyr::rename(true_family = class_name, image_id = filename)
+fm_df <- dplyr::left_join(fm_pr, fm_tar, by = "image_id") %>%
+  dplyr::select(image_id, family_prediction, confidence, true_family) %>%
+  dplyr::rename(family_confidence = confidence)
+fm_df <- fm_df %>%
+  dplyr::left_join(tax_dict, by = "true_family") %>%
+  dplyr::select(-true_species) %>%
+  dplyr::distinct()
+
+# get family metrics
+fm_test_mets_full <- oos_eval_metrics(fm_df, models = "family", confidence_threshold = 0, source_id = "test")
+fm_test_mets_70 <- oos_eval_metrics(fm_df, models = "family", confidence_threshold = 0.7, source_id = "test")
+
+# load general info
+gn_pr <- data.table::fread(paste0(v2_pth, "general_v2/pred_df_50epochs.csv"))
+gn_tar <- read.csv(paste0(v2_pth, "general_v2/target_df.csv"))
+
+# format and join
+gn_pr <- gn_pr %>%
+  dplyr::rename(image_id = filename, 
+                general_prediction = class_name, 
+                general_confidence = confidence) %>%
+  dplyr::mutate(general_prediction = stringr::str_to_title(general_prediction)) %>%
+  dplyr::mutate(general_prediction = if_else(general_prediction == "Mammal", "Mammalia",
+                                             if_else(general_prediction == "Bird", "Aves", general_prediction)))
+gn_tar <- gn_tar %>%
+  dplyr::rename(image_id = filename, true_class = class_name) %>%
+  dplyr::mutate(true_class = stringr::str_to_title(true_class)) %>%
+  dplyr::mutate(true_class = if_else(stringr::str_detect(image_id, "Human"), "Human", true_class))
+gn_df <- dplyr::left_join(gn_pr, gn_tar, by = "image_id") %>%
+  dplyr::select(c(image_id, true_class, general_prediction, general_confidence)) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(general_prediction = factor(general_prediction,
+                                            levels = c("Aves", "Mammalia", "Vehicle", "Human", "Empty")))
+
+# get general test metrics
+gn_test_mets_full <- oos_eval_metrics(gn_df, models = "general", confidence_threshold = 0, source_id = "test")
+gn_test_mets_70 <- oos_eval_metrics(gn_df, models = "general", confidence_threshold = 0.7, source_id = "test")
+```
+
